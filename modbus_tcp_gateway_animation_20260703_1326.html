@@ -1,0 +1,810 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Modbus TCP Gateway 通信闭环动画</title>
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+  <script>
+    /* CDN 不可用时的轻量兼容层：保留 timeline / to / fromTo / set 接口，确保单文件离线可演示。 */
+    if (!window.gsap) {
+      (() => {
+        const reserved = new Set(["duration","delay","ease","onComplete","onUpdate"]);
+        const list = value => value instanceof Element ? [value] : Array.from(value || []);
+        const applyDom = (el, vars) => {
+          const x = vars.x ?? Number(el.dataset.gsapX || 0);
+          const y = vars.y ?? Number(el.dataset.gsapY || 0);
+          const scale = vars.scale ?? Number(el.dataset.gsapScale || 1);
+          if ("x" in vars) el.dataset.gsapX = x;
+          if ("y" in vars) el.dataset.gsapY = y;
+          if ("scale" in vars) el.dataset.gsapScale = scale;
+          if ("x" in vars || "y" in vars || "scale" in vars) el.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
+          Object.entries(vars).forEach(([key,val]) => {
+            if (!reserved.has(key) && !["x","y","scale"].includes(key)) el.style[key] = typeof val === "number" && key !== "opacity" ? `${val}px` : val;
+          });
+        };
+        const animate = (target, vars, fromVars) => {
+          if (!(target instanceof Element) && !Array.isArray(target) && !(target instanceof NodeList)) {
+            const obj = target, start = {}, end = {};
+            Object.entries(vars).forEach(([k,v]) => { if (!reserved.has(k) && typeof v === "number") { start[k] = Number(obj[k]) || 0; end[k] = v; }});
+            const delay = (vars.delay || 0) * 1000, duration = Math.max(1,(vars.duration || 0) * 1000);
+            setTimeout(() => {
+              const begin = Date.now();
+              const tick = () => {
+                const p = Math.min(1,(Date.now()-begin)/duration);
+                Object.keys(end).forEach(k => obj[k] = start[k] + (end[k]-start[k])*p);
+                vars.onUpdate?.();
+                if (p < 1) requestAnimationFrame(tick); else vars.onComplete?.();
+              };
+              tick();
+            },delay);
+            return target;
+          }
+          list(target).forEach(el => {
+            if (fromVars) applyDom(el,fromVars);
+            const delay=(vars.delay||0)*1000, duration=(vars.duration||0)*1000;
+            setTimeout(() => {
+              el.style.transition = `all ${duration}ms ease`;
+              requestAnimationFrame(() => applyDom(el,vars));
+              setTimeout(() => { el.style.transition=""; vars.onComplete?.(); },duration);
+            },delay);
+          });
+          return target;
+        };
+        class TinyTimeline {
+          constructor(opts={}) { this.items=[]; this.i=0; this.paused=opts.paused ?? false; this.timer=null; this.done=null; this.killed=false; }
+          call(fn) { this.items.push({kind:"call",fn}); return this; }
+          to(target,vars) { this.items.push({kind:"wait",ms:(vars.duration||0)*1000}); return this; }
+          eventCallback(name,fn) { if(name==="onComplete") this.done=fn; return this; }
+          play(position) { if(position===0){ this.i=0; this.killed=false; } this.paused=false; this.advance(); return this; }
+          advance() {
+            if(this.paused||this.killed) return;
+            if(this.i>=this.items.length){ this.done?.(); return; }
+            const item=this.items[this.i++];
+            if(item.kind==="call"){ item.fn(); this.advance(); }
+            else this.timer=setTimeout(()=>this.advance(),item.ms);
+          }
+          pause(){ this.paused=true; clearTimeout(this.timer); return this; }
+          kill(){ this.killed=true; clearTimeout(this.timer); return this; }
+          progress(){ return this.items.length ? Math.min(1,this.i/this.items.length) : 0; }
+        }
+        window.gsap = {
+          timeline: opts => new TinyTimeline(opts),
+          to: (target,vars) => animate(target,vars),
+          fromTo: (target,fromVars,toVars) => animate(target,toVars,fromVars),
+          set: (target,vars) => { list(target).forEach(el=>applyDom(el,vars)); return target; },
+          killTweensOf: () => {}
+        };
+      })();
+    }
+  </script>
+  <style>
+    :root {
+      --bg: #071019;
+      --panel: rgba(10, 26, 39, .93);
+      --panel-2: rgba(13, 34, 49, .88);
+      --line: #1c4054;
+      --text: #dcecf3;
+      --muted: #7893a3;
+      --cyan: #22d3ee;
+      --blue: #3b82f6;
+      --green: #34d399;
+      --yellow: #fbbf24;
+      --orange: #fb923c;
+      --red: #fb5f6d;
+      --purple: #c084fc;
+      --shadow: 0 18px 42px rgba(0,0,0,.28);
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--text); }
+    body {
+      font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+      overflow-x: hidden;
+      background:
+        radial-gradient(circle at 52% -5%, rgba(34,211,238,.13), transparent 33%),
+        linear-gradient(rgba(25,63,82,.08) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(25,63,82,.08) 1px, transparent 1px),
+        #071019;
+      background-size: auto, 30px 30px, 30px 30px, auto;
+    }
+    button { font: inherit; }
+    .app { width: min(1920px, 100%); margin: 0 auto; padding: 18px; }
+    .topbar {
+      display: grid; grid-template-columns: 1fr auto; gap: 18px; align-items: center;
+      margin-bottom: 14px;
+    }
+    .eyebrow { color: var(--cyan); letter-spacing: .18em; font: 700 11px/1.3 ui-monospace, monospace; }
+    h1 { margin: 5px 0 4px; font-size: clamp(23px, 2.1vw, 36px); letter-spacing: -.03em; }
+    .subtitle { color: #9db5c2; font-size: 13px; }
+    .boundary-pill {
+      border: 1px solid rgba(34,211,238,.36); border-radius: 999px; padding: 9px 14px;
+      color: #b9eef6; background: rgba(34,211,238,.07); font-size: 12px; white-space: nowrap;
+    }
+    .control-deck {
+      display: grid; grid-template-columns: auto minmax(260px,1fr) auto; align-items: center; gap: 12px;
+      padding: 10px 12px; border: 1px solid var(--line); border-radius: 14px;
+      background: rgba(7,18,29,.87); box-shadow: var(--shadow); margin-bottom: 14px;
+    }
+    .controls { display: flex; gap: 7px; flex-wrap: wrap; }
+    .btn {
+      border: 1px solid #28506a; background: #0e2637; color: #cbe6ef; padding: 8px 11px;
+      border-radius: 8px; cursor: pointer; transition: .2s;
+    }
+    .btn:hover { border-color: var(--cyan); color: white; transform: translateY(-1px); }
+    .btn.primary { background: linear-gradient(135deg,#0e7490,#2563eb); border-color: #38bdf8; }
+    .progress-wrap { min-width: 0; }
+    .step-copy { display: flex; justify-content: space-between; color: #b7cbd5; font-size: 12px; gap: 15px; }
+    .step-copy strong { color: white; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .progress { height: 5px; background: #10293b; border-radius: 9px; overflow: hidden; margin-top: 7px; }
+    .progress > i { display: block; height: 100%; width: 0; background: linear-gradient(90deg,var(--cyan),var(--green)); box-shadow: 0 0 15px var(--cyan); }
+    .runtime-badges { display: flex; gap: 7px; flex-wrap: wrap; justify-content: flex-end; }
+    .badge { padding: 6px 9px; border: 1px solid #23465a; background: #0c2231; border-radius: 7px; font: 700 11px/1.2 ui-monospace, monospace; color: #9fc8d7; }
+    .badge.status { color: var(--cyan); border-color: rgba(34,211,238,.4); }
+
+    .workspace { display: grid; grid-template-columns: minmax(315px,.9fr) minmax(500px,1.35fr) minmax(360px,.92fr); gap: 14px; min-height: 760px; }
+    .panel { border: 1px solid var(--line); background: var(--panel); border-radius: 15px; box-shadow: var(--shadow); min-width: 0; overflow: hidden; }
+    .panel-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--line); background: rgba(15,39,55,.62); }
+    .panel-title { display: flex; align-items: center; gap: 9px; font-weight: 800; font-size: 13px; letter-spacing: .02em; }
+    .panel-index { font: 800 10px/1 ui-monospace,monospace; color: var(--cyan); border: 1px solid rgba(34,211,238,.35); padding: 5px; border-radius: 6px; }
+    .head-tag { color: var(--muted); font: 700 10px/1.2 ui-monospace, monospace; }
+    .section-label { color: #91aab7; font: 800 10px/1.3 ui-monospace,monospace; letter-spacing: .1em; text-transform: uppercase; margin-bottom: 8px; }
+
+    /* 左侧工业现场 */
+    .field-body { padding: 12px; }
+    .field-stage {
+      position: relative; height: 480px; border: 1px solid #18394c; border-radius: 12px; overflow: hidden;
+      background: radial-gradient(circle at 50% 48%,rgba(34,211,238,.08),transparent 38%), #071723;
+    }
+    .field-stage::after { content:"INDUSTRIAL ETHERNET / TCP 502"; position:absolute; left:12px; bottom:9px; color:#335c70; font:700 9px ui-monospace,monospace; letter-spacing:.12em; }
+    .network-lines { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; }
+    .net-line { fill:none; stroke:#28556b; stroke-width:2; transition:.35s; }
+    .net-line.active { stroke:var(--cyan); stroke-width:3; filter:drop-shadow(0 0 5px rgba(34,211,238,.8)); }
+    .net-line.error { stroke:var(--red); stroke-dasharray:7 6; }
+    .net-line.reconnecting { stroke:var(--yellow); stroke-width:3; stroke-dasharray:5 5; animation:dash .65s linear infinite; }
+    @keyframes dash { to { stroke-dashoffset:-20; } }
+    .device {
+      position:absolute; width:125px; min-height:64px; padding:9px 9px 8px; border:1px solid #285067; border-radius:10px;
+      background:linear-gradient(145deg,rgba(17,45,61,.98),rgba(8,24,36,.98)); transition:.3s; z-index:2;
+    }
+    .device.active { border-color:var(--cyan); box-shadow:0 0 0 1px rgba(34,211,238,.28),0 0 22px rgba(34,211,238,.15); transform:translateY(-2px); }
+    .device.offline { border-color:var(--red); filter:saturate(.65); }
+    .device.degraded { border-color:var(--yellow); }
+    .device-icon { width:24px; height:24px; display:grid; place-items:center; border-radius:6px; background:#12374b; color:var(--cyan); font:800 12px ui-monospace,monospace; float:left; margin-right:7px; }
+    .device-name { font-size:11px; font-weight:800; white-space:nowrap; }
+    .device-meta { color:#7394a4; font:9px/1.35 ui-monospace,monospace; margin-top:3px; }
+    .status-dot { width:7px; height:7px; border-radius:50%; background:#516775; position:absolute; right:8px; top:8px; box-shadow:0 0 7px currentColor; }
+    .status-dot.online { background:var(--green); color:var(--green); }
+    .status-dot.degraded { background:var(--yellow); color:var(--yellow); }
+    .status-dot.offline { background:var(--red); color:var(--red); }
+    #upper-system { left:calc(50% - 62px); top:15px; }
+    #plc { left:12px; top:114px; }
+    #meter { right:12px; top:114px; }
+    #switch { left:calc(50% - 62px); top:176px; }
+    #remote-io { right:12px; top:274px; }
+    #gateway { left:12px; top:274px; min-height:78px; border-color:#29758a; }
+    .gateway-core { position:absolute; width:42px; height:42px; border-radius:50%; left:calc(50% - 21px); top:282px; border:1px dashed rgba(34,211,238,.45); animation:spin 8s linear infinite; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+    .packet-token {
+      position:absolute; left:0; top:0; z-index:7; opacity:0; pointer-events:none; padding:5px 7px; min-width:54px; text-align:center;
+      border-radius:6px; font:900 9px/1 ui-monospace,monospace; color:#031017; background:var(--cyan); box-shadow:0 0 18px rgba(34,211,238,.7);
+    }
+    .packet-token.response { background:var(--green); box-shadow:0 0 18px rgba(52,211,153,.7); }
+    .packet-token.write { background:var(--purple); color:#170824; box-shadow:0 0 18px rgba(192,132,252,.7); }
+    .packet-token.timeout { background:var(--red); color:#250509; box-shadow:0 0 18px rgba(251,95,109,.7); }
+    .legend { display:flex; flex-wrap:wrap; gap:8px 12px; margin-top:11px; color:#7694a3; font-size:10px; }
+    .legend span::before { content:""; display:inline-block; width:8px; height:8px; border-radius:3px; background:var(--dot); margin-right:5px; }
+    .field-status-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:7px; margin-top:11px; }
+    .mini-stat { border:1px solid #1b3c50; border-radius:8px; padding:8px; background:#091b29; }
+    .mini-stat small { display:block; color:#688897; font-size:9px; }
+    .mini-stat b { display:block; color:#d4e9ef; margin-top:4px; font:800 11px ui-monospace,monospace; overflow:hidden; text-overflow:ellipsis; }
+    .upper-output { margin-top:10px; border:1px solid #1e4052; border-radius:9px; padding:9px; background:#081a27; }
+    .output-chips { display:flex; flex-wrap:wrap; gap:5px; }
+    .output-chips i { font-style:normal; color:#8cabb9; border:1px solid #21475a; background:#102738; padding:4px 6px; border-radius:5px; font:700 9px ui-monospace,monospace; }
+
+    /* 中间调试视图 */
+    .tech-body { padding:11px; display:grid; gap:9px; }
+    .tech-top { display:grid; grid-template-columns:1.15fr .85fr; gap:9px; }
+    .card { border:1px solid #1d4053; background:var(--panel-2); border-radius:10px; padding:10px; min-width:0; }
+    .profile-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:5px 10px; }
+    .kv { display:flex; justify-content:space-between; gap:8px; border-bottom:1px dashed rgba(62,96,113,.3); padding:3px 0; font:10px/1.45 ui-monospace,monospace; }
+    .kv span { color:#71909f; }
+    .kv b { color:#d7edf3; overflow:hidden; text-overflow:ellipsis; }
+    .state-line { display:flex; align-items:center; gap:9px; margin-bottom:9px; }
+    .big-dot { width:13px; height:13px; border-radius:50%; background:var(--cyan); box-shadow:0 0 15px currentColor; color:var(--cyan); }
+    .connection-state { font-size:18px; font-weight:900; letter-spacing:-.03em; color:#dff7fb; }
+    .counter-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; }
+    .counter { padding:7px 5px; text-align:center; border-radius:7px; background:#091c2a; border:1px solid #1a3c4e; }
+    .counter small { color:#628494; font-size:8px; display:block; }
+    .counter b { display:block; color:var(--cyan); font:900 13px ui-monospace,monospace; margin-top:4px; }
+    .protocol-grid { display:grid; grid-template-columns:1.18fr .82fr; gap:9px; }
+    table { width:100%; border-collapse:collapse; font:10px/1.35 ui-monospace,monospace; }
+    th { color:#668998; text-align:left; font-size:8px; text-transform:uppercase; letter-spacing:.08em; padding:5px; border-bottom:1px solid #234657; }
+    td { padding:5px; border-bottom:1px solid rgba(39,75,91,.55); }
+    td:nth-child(2) { color:var(--cyan); font-weight:800; }
+    td:last-child { color:#83a0ad; }
+    .hex-box { background:#06141f; border:1px solid #183b4d; border-radius:7px; padding:8px; font:9.5px/1.55 ui-monospace,monospace; color:#8fc4d5; word-break:break-all; min-height:44px; }
+    .hex-box.tx { border-left:3px solid var(--cyan); }
+    .hex-box.rx { border-left:3px solid var(--green); }
+    .hex-box.error { border-left-color:var(--red); color:#ff9aa4; }
+    .packet-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+    .block-grid { display:grid; grid-template-columns:1.05fr .95fr; gap:9px; }
+    .raw-array { font:800 10px/1.6 ui-monospace,monospace; color:#a7ebca; word-break:break-word; }
+    .result-card { position:relative; overflow:hidden; }
+    .result-card::before { content:""; position:absolute; inset:0 auto 0 0; width:3px; background:var(--green); }
+    .result-status { font:900 18px ui-monospace,monospace; color:var(--green); }
+    .ex-panel { display:grid; grid-template-columns:repeat(3,1fr); gap:7px; }
+    .ex-group { border:1px solid #244354; border-radius:8px; padding:8px; background:#091c29; min-width:0; }
+    .ex-group.network { border-top:2px solid var(--red); }
+    .ex-group.modbus { border-top:2px solid var(--orange); }
+    .ex-group.validation { border-top:2px solid var(--purple); }
+    .ex-group h4 { margin:0 0 6px; font-size:10px; }
+    .ex-list { display:flex; flex-wrap:wrap; gap:3px; }
+    .ex-list i { font-style:normal; padding:3px 4px; background:#102737; border-radius:4px; color:#7998a7; font:7.5px ui-monospace,monospace; }
+    .ex-list i.hot { color:white; background:rgba(251,95,109,.25); outline:1px solid rgba(251,95,109,.6); }
+    .ex-policy { color:#638493; font-size:8px; line-height:1.45; margin-top:6px; }
+    .lower-grid { display:grid; grid-template-columns:.72fr 1.28fr; gap:9px; }
+    .state-machine { display:flex; flex-wrap:wrap; gap:5px; align-content:flex-start; }
+    .state-chip { padding:4px 6px; border:1px solid #234a5d; color:#698b9b; border-radius:5px; font:800 8px ui-monospace,monospace; }
+    .state-chip.active { color:#06151d; background:var(--cyan); border-color:var(--cyan); box-shadow:0 0 13px rgba(34,211,238,.4); }
+    .log-window { height:120px; overflow:auto; background:#05131d; border:1px solid #173647; border-radius:8px; padding:7px; font:9px/1.55 ui-monospace,monospace; }
+    .log-row { color:#7899a8; white-space:pre-wrap; animation:logIn .25s ease; }
+    .log-row.info { color:#7fc7dc; } .log-row.tx { color:#52d8ef; } .log-row.rx { color:#7ce0ad; }
+    .log-row.ok { color:var(--green); } .log-row.warn { color:var(--yellow); } .log-row.error { color:#ff7d89; }
+    @keyframes logIn { from { opacity:0; transform:translateX(-5px); } }
+
+    /* 右侧流程 */
+    .flow-panel { display:flex; flex-direction:column; min-height:0; }
+    .flow-scroll { position:relative; height:575px; overflow:auto; padding:10px 12px 10px 30px; scroll-behavior:smooth; }
+    .flow-scroll::before { content:""; position:absolute; left:19px; top:24px; bottom:24px; width:1px; background:linear-gradient(var(--cyan),#244b5e 18%,#244b5e 85%,var(--purple)); }
+    .flow-node {
+      position:relative; display:grid; grid-template-columns:26px 1fr auto; align-items:center; gap:8px; padding:8px;
+      margin-bottom:6px; border:1px solid #1f4052; border-radius:8px; background:#0a1e2c; cursor:pointer; transition:.22s;
+    }
+    .flow-node:hover { border-color:#31708c; transform:translateX(2px); }
+    .flow-node::before { content:""; position:absolute; width:7px; height:7px; border-radius:50%; left:-15px; top:50%; transform:translateY(-50%); background:#335768; border:2px solid #0a1b28; }
+    .flow-node.active { border-color:var(--cyan); background:linear-gradient(90deg,rgba(34,211,238,.14),#0b2231); box-shadow:0 0 17px rgba(34,211,238,.09); }
+    .flow-node.active::before { background:var(--cyan); box-shadow:0 0 10px var(--cyan); }
+    .flow-node.done { border-color:rgba(52,211,153,.25); }
+    .flow-node.done::before { background:var(--green); }
+    .flow-num { width:25px; height:25px; display:grid; place-items:center; border-radius:6px; background:#102c3e; color:#6fa0b3; font:900 9px ui-monospace,monospace; }
+    .flow-copy strong { display:block; font-size:10px; }
+    .flow-copy span { display:block; color:#617f8d; font:8px/1.3 ui-monospace,monospace; margin-top:2px; }
+    .node-state { color:#577b8c; font:800 7px ui-monospace,monospace; }
+    .flow-node.active .node-state { color:var(--cyan); }
+    .flow-token { position:absolute; z-index:4; left:4px; top:12px; width:25px; height:14px; display:grid; place-items:center; border-radius:5px; background:var(--cyan); color:#04151c; font:900 6px ui-monospace,monospace; box-shadow:0 0 12px var(--cyan); pointer-events:none; }
+    .detail-preview { border-top:1px solid var(--line); background:#081a27; padding:11px 13px; min-height:150px; }
+    .detail-preview h3 { margin:0 0 4px; font-size:13px; }
+    .preview-purpose { color:#98b3bf; font-size:10px; line-height:1.55; }
+    .english { margin-top:7px; padding:6px 8px; border-left:2px solid var(--cyan); color:#90dbe7; background:rgba(34,211,238,.05); font:italic 9px/1.45 ui-monospace,monospace; }
+    .click-hint { color:#4f7485; font-size:8px; margin-top:6px; }
+
+    .memory-strip {
+      margin-top:14px; border:1px solid rgba(34,211,238,.28); border-radius:12px; background:linear-gradient(90deg,rgba(34,211,238,.06),rgba(192,132,252,.05));
+      padding:11px 14px; display:flex; align-items:center; justify-content:center; gap:10px; color:#cceaf1; font-size:13px; font-weight:800; text-align:center;
+    }
+    .memory-strip b { color:var(--cyan); font:900 10px ui-monospace,monospace; }
+
+    .modal { position:fixed; inset:0; z-index:50; display:none; place-items:center; padding:24px; background:rgba(1,9,14,.78); backdrop-filter:blur(8px); }
+    .modal.open { display:grid; }
+    .modal-card { width:min(760px,96vw); max-height:88vh; overflow:auto; border:1px solid #2d6075; border-radius:15px; background:#0a1d2b; box-shadow:0 30px 80px rgba(0,0,0,.5); }
+    .modal-head { position:sticky; top:0; display:flex; justify-content:space-between; align-items:center; padding:14px 16px; background:#0d2636; border-bottom:1px solid #244b5d; z-index:1; }
+    .modal-head h2 { margin:0; font-size:18px; }
+    .close { border:1px solid #365d6f; background:#102b3c; color:white; width:30px; height:30px; border-radius:7px; cursor:pointer; }
+    .modal-body { padding:16px; display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .detail-field { border:1px solid #1e4153; border-radius:9px; padding:10px; background:#081925; }
+    .detail-field.wide { grid-column:1/-1; }
+    .detail-field label { color:#5e8799; font:800 8px ui-monospace,monospace; letter-spacing:.1em; }
+    .detail-field p { margin:6px 0 0; color:#c1d8e1; font-size:11px; line-height:1.65; }
+    .detail-field ul { margin:6px 0 0; padding-left:17px; color:#b0cad4; font-size:11px; line-height:1.65; }
+
+    .final-overlay { position:fixed; inset:0; z-index:40; display:none; place-items:center; padding:24px; background:rgba(2,10,16,.82); backdrop-filter:blur(9px); }
+    .final-overlay.show { display:grid; }
+    .final-card { width:min(720px,95vw); border:1px solid rgba(52,211,153,.55); background:linear-gradient(145deg,#0d2933,#0a1823); border-radius:18px; padding:22px; box-shadow:0 0 70px rgba(52,211,153,.15); }
+    .final-icon { width:48px; height:48px; display:grid; place-items:center; border-radius:50%; background:rgba(52,211,153,.13); color:var(--green); font-size:25px; border:1px solid rgba(52,211,153,.5); }
+    .final-card h2 { margin:12px 0 5px; font-size:24px; }
+    .final-card > p { color:#8fabb8; font-size:12px; line-height:1.65; }
+    .final-list { display:grid; grid-template-columns:1fr 1fr; gap:7px; margin:14px 0; }
+    .final-list div { border:1px solid #214353; border-radius:7px; padding:8px; color:#a8c3ce; font-size:10px; background:#091b27; }
+    .final-list div::before { content:"✓"; color:var(--green); margin-right:7px; font-weight:900; }
+    .final-quote { border-left:3px solid var(--green); padding:8px 11px; background:rgba(52,211,153,.05); font-weight:800; font-size:12px; line-height:1.6; }
+    .final-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:14px; }
+
+    @media (max-width: 1220px) {
+      .workspace { grid-template-columns:minmax(300px,.9fr) minmax(470px,1.35fr); }
+      .flow-panel { grid-column:1/-1; }
+      .flow-scroll { height:420px; display:grid; grid-template-columns:1fr 1fr; gap:6px 20px; }
+      .flow-node { margin:0; }
+    }
+    @media (max-width: 820px) {
+      .app { padding:10px; } .topbar { grid-template-columns:1fr; } .boundary-pill { white-space:normal; }
+      .control-deck, .workspace { grid-template-columns:1fr; } .runtime-badges { justify-content:flex-start; }
+      .tech-top,.protocol-grid,.block-grid,.lower-grid { grid-template-columns:1fr; }
+      .ex-panel { grid-template-columns:1fr; } .flow-panel { grid-column:auto; } .flow-scroll { grid-template-columns:1fr; height:540px; }
+      .modal-body,.final-list { grid-template-columns:1fr; } .detail-field.wide { grid-column:auto; }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <header class="topbar">
+      <div>
+        <div class="eyebrow">MODBUS_TCP_GATEWAY · COMMUNICATION THEATER</div>
+        <h1>Modbus TCP Gateway 通信闭环</h1>
+        <div class="subtitle">工业现场 × 通信报文 × 流程节点，三层同步演示</div>
+      </div>
+      <div class="boundary-pill">Gateway 首先是通信事务模型，不是业务数据处理模型</div>
+    </header>
+
+    <section class="control-deck" aria-label="动画控制台">
+      <div class="controls">
+        <button class="btn primary" id="playBtn">▶ Play</button>
+        <button class="btn" id="pauseBtn">Ⅱ Pause</button>
+        <button class="btn" id="restartBtn">↻ Restart</button>
+        <button class="btn" id="nextBtn">Step Next →</button>
+      </div>
+      <div class="progress-wrap">
+        <div class="step-copy"><strong id="stepTitle">准备开始：加载 DeviceProfile</strong><span id="stepCount">0 / 28</span></div>
+        <div class="progress"><i id="progressBar"></i></div>
+      </div>
+      <div class="runtime-badges">
+        <span class="badge" id="txBadge">tx —</span>
+        <span class="badge" id="deviceBadge">plc-line-01</span>
+        <span class="badge status" id="statusBadge">Ready</span>
+      </div>
+    </section>
+
+    <section class="workspace">
+      <article class="panel field-panel">
+        <div class="panel-head"><div class="panel-title"><span class="panel-index">01</span>工业现场区</div><span class="head-tag">FIELD / TCP 502</span></div>
+        <div class="field-body">
+          <div class="field-stage" id="fieldStage">
+            <svg class="network-lines" viewBox="0 0 400 480" preserveAspectRatio="none" aria-label="工业以太网拓扑">
+              <path id="line-upper" class="net-line" d="M200 78 L200 176" />
+              <path id="line-plc" class="net-line" d="M137 146 L200 208" />
+              <path id="line-meter" class="net-line" d="M263 146 L200 208" />
+              <path id="line-gateway" class="net-line active" d="M137 312 L200 238" />
+              <path id="line-io" class="net-line" d="M263 312 L200 238" />
+            </svg>
+            <div class="device" id="upper-system"><span class="status-dot online"></span><span class="device-icon">UP</span><div class="device-name">Upper System</div><div class="device-meta">WPF · MQTT · DB<br>接收通信结果</div></div>
+            <div class="device" id="plc"><span class="status-dot online"></span><span class="device-icon">PLC</span><div class="device-name">产线 PLC</div><div class="device-meta">192.168.1.20:502<br>UnitId 1 · FC03/06</div></div>
+            <div class="device" id="meter"><span class="status-dot online"></span><span class="device-icon">kWh</span><div class="device-name">电表</div><div class="device-meta">192.168.1.30:502<br>UnitId 1 · FC04</div></div>
+            <div class="device" id="switch"><span class="status-dot online"></span><span class="device-icon">SW</span><div class="device-name">工业交换机</div><div class="device-meta">Industrial Ethernet<br>Full Duplex</div></div>
+            <div class="device" id="remote-io"><span class="status-dot online"></span><span class="device-icon">IO</span><div class="device-name">远程 IO</div><div class="device-meta">192.168.1.40:502<br>UnitId 2 · FC02</div></div>
+            <div class="device active" id="gateway"><span class="status-dot online"></span><span class="device-icon">GW</span><div class="device-name">Modbus Gateway</div><div class="device-meta">Transaction Layer<br>Connection + Validation</div></div>
+            <div class="gateway-core"></div>
+            <div class="packet-token" id="packetToken">FC03 TX</div>
+          </div>
+          <div class="legend">
+            <span style="--dot:var(--cyan)">Read Request</span><span style="--dot:var(--green)">Response</span>
+            <span style="--dot:var(--purple)">WriteCommand</span><span style="--dot:var(--red)">Timeout/Error</span>
+          </div>
+          <div class="field-status-grid">
+            <div class="mini-stat"><small>PLC STATE</small><b id="fieldDeviceState">Disconnected</b></div>
+            <div class="mini-stat"><small>TCP CHANNEL</small><b id="tcpChannel">Idle</b></div>
+            <div class="mini-stat"><small>ACTIVE ADU</small><b id="activeAdu">—</b></div>
+          </div>
+          <div class="upper-output">
+            <div class="section-label">UPPER LAYER RECEIVES ONLY</div>
+            <div class="output-chips"><i>RawDataBlock</i><i>CommunicationResult</i><i>WriteResult</i><i>ErrorResult</i></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="panel tech-panel">
+        <div class="panel-head"><div class="panel-title"><span class="panel-index">02</span>技术处理 / 调试视图</div><span class="head-tag">MBAP · PDU · VALIDATION</span></div>
+        <div class="tech-body">
+          <div class="tech-top">
+            <section class="card">
+              <div class="section-label">DEVICEPROFILE / plc-line-01</div>
+              <div class="profile-grid" id="profileGrid"></div>
+            </section>
+            <section class="card">
+              <div class="section-label">CONNECTION & TRANSACTION</div>
+              <div class="state-line"><span class="big-dot" id="connectionDot"></span><div class="connection-state" id="connectionState">Disconnected</div></div>
+              <div class="counter-grid">
+                <div class="counter"><small>TransactionId</small><b id="tidValue">—</b></div>
+                <div class="counter"><small>Retry Count</small><b id="retryValue">0 / 2</b></div>
+                <div class="counter"><small>Reconnect</small><b id="reconnectValue">—</b></div>
+              </div>
+            </section>
+          </div>
+
+          <div class="protocol-grid">
+            <section class="card">
+              <div class="section-label">MBAP HEADER</div>
+              <table><thead><tr><th>Field</th><th>Example</th><th>Meaning</th></tr></thead><tbody>
+                <tr><td>TransactionId</td><td id="mbapTid">—</td><td>请求与响应配对</td></tr>
+                <tr><td>ProtocolId</td><td id="mbapPid">0</td><td>Modbus TCP 固定为 0</td></tr>
+                <tr><td>Length</td><td id="mbapLen">6</td><td>UnitId + PDU 长度</td></tr>
+                <tr><td>UnitId</td><td id="mbapUid">1</td><td>设备单元/路由标识</td></tr>
+              </tbody></table>
+            </section>
+            <section class="card">
+              <div class="section-label">PDU</div>
+              <table><thead><tr><th>Field</th><th>Example</th></tr></thead><tbody>
+                <tr><td>FunctionCode</td><td id="pduFc">03</td></tr>
+                <tr><td>StartAddress</td><td id="pduAddr">0</td></tr>
+                <tr><td>Quantity / Value</td><td id="pduQty">10</td></tr>
+                <tr><td>ByteCount</td><td id="pduBytes">—</td></tr>
+              </tbody></table>
+            </section>
+          </div>
+
+          <div class="packet-grid">
+            <section><div class="section-label">REQUEST ADU / TX</div><div class="hex-box tx" id="requestHex">— waiting for request —</div></section>
+            <section><div class="section-label">RESPONSE ADU / RX</div><div class="hex-box rx" id="responseHex">— waiting for response —</div></section>
+          </div>
+
+          <div class="block-grid">
+            <section class="card">
+              <div class="section-label">RAWDATABLOCK · NO BUSINESS MEANING</div>
+              <div class="raw-array" id="rawBlock">RawRegisterBlock { Values: [—], Quality: Unknown }</div>
+            </section>
+            <section class="card result-card">
+              <div class="section-label">COMMUNICATIONRESULT</div>
+              <div class="result-status" id="resultStatus">Pending</div>
+              <div class="kv"><span>DeviceId</span><b>plc-line-01</b></div>
+              <div class="kv"><span>LatencyMs</span><b id="latencyValue">—</b></div>
+              <div class="kv"><span>Error</span><b id="errorValue">None</b></div>
+            </section>
+          </div>
+
+          <section>
+            <div class="section-label">EXCEPTION CLASSIFICATION · 三类错误必须分开</div>
+            <div class="ex-panel">
+              <div class="ex-group network"><h4>网络层异常</h4><div class="ex-list" id="networkExceptions"></div><div class="ex-policy">关闭旧连接 · 失败计数 · Degraded/Offline · Retry/Reconnect</div></div>
+              <div class="ex-group modbus"><h4>Modbus 协议异常</h4><div class="ex-list" id="modbusExceptions"></div><div class="ex-policy">设备已回复但拒绝执行 · 返回 ModbusException · TCP 不一定断开</div></div>
+              <div class="ex-group validation"><h4>Gateway 校验异常</h4><div class="ex-list" id="validationExceptions"></div><div class="ex-policy">不相信响应 · 记录原始帧 · 返回 ValidationError · 关闭连接</div></div>
+            </div>
+          </section>
+
+          <div class="lower-grid">
+            <section class="card"><div class="section-label">DEVICE HEALTH STATE MACHINE</div><div class="state-machine" id="stateMachine"></div></section>
+            <section><div class="section-label">COMMUNICATION LOG</div><div class="log-window" id="logWindow"></div></section>
+          </div>
+        </div>
+      </article>
+
+      <article class="panel flow-panel">
+        <div class="panel-head"><div class="panel-title"><span class="panel-index">03</span>业务流程区</div><span class="head-tag">CLICK ANY NODE</span></div>
+        <div class="flow-scroll" id="flowScroll"><div class="flow-token" id="flowToken">tx—</div></div>
+        <div class="detail-preview" id="detailPreview"></div>
+      </article>
+    </section>
+
+    <footer class="memory-strip"><b>MEMORY LOOP</b> 配设备 → 连 TCP → 发请求 → 收响应 → 对事务 → 验报文 → 解原始值 → 报状态 → 异常恢复 → 写命令 → 看反馈</footer>
+  </main>
+
+  <div class="modal" id="detailModal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal-card">
+      <div class="modal-head"><h2 id="modalTitle">节点详情</h2><button class="close" id="modalClose" aria-label="关闭">×</button></div>
+      <div class="modal-body" id="modalBody"></div>
+    </div>
+  </div>
+
+  <div class="final-overlay" id="finalOverlay">
+    <div class="final-card">
+      <div class="final-icon">✓</div>
+      <h2>Modbus TCP Gateway Loop Completed</h2>
+      <p>完整通信事务、异常恢复与写命令确认路径已演示。</p>
+      <div class="final-list">
+        <div>设备配置已加载，TCP 连接已建立</div><div>读请求完成事务匹配与报文校验</div>
+        <div>原始寄存器数据与 CommunicationResult 已输出</div><div>Timeout / Retry / Reconnect 已演示</div>
+        <div>ModbusException / ValidationError 已分类</div><div>FC06 协议回显与 FC03 读回确认完成</div>
+        <div>设备健康状态已更新</div><div>通信日志已记录</div>
+      </div>
+      <div class="final-quote">Modbus TCP Gateway 的核心价值不是解释业务含义，而是稳定地完成通信事务、校验响应、输出原始结果，并在异常时恢复通信。</div>
+      <div class="english">A Modbus TCP gateway is a stable transaction layer between field devices and upper software systems.</div>
+      <div class="final-actions"><button class="btn" id="finalClose">查看画面</button><button class="btn primary" id="finalRestart">↻ Replay</button></div>
+    </div>
+  </div>
+
+  <script>
+    const profile = {
+      DeviceId: "plc-line-01", IP: "192.168.1.20", Port: 502, UnitId: 1,
+      FunctionCode: "03", StartAddress: 0, Quantity: 10,
+      PollingIntervalMs: 1000, TimeoutMs: 1000, RetryCount: 2
+    };
+
+    const flowNodes = [
+      { id:"device-profile", title:"设备配置", shortLabel:"DeviceProfile", businessPurpose:"定义 Gateway 要连接谁、读什么地址、读多少数据、多久执行一次以及失败后如何处理。", input:"设备清单、IP、Port、UnitId、功能码、起始地址、数量、轮询周期、超时与重试策略。", output:"经过结构化的 DeviceProfile，供连接、调度和事务构建共同使用。", technologies:["配置模型与默认值","设备唯一标识","轮询组参数"], abnormalCases:["缺少 IP/Port","Quantity 越界","FC 与地址区不匹配"], relation:"闭环起点。配置校验通过后才能交给 ConnectionManager；它描述通信，不解释寄存器业务含义。", interviewEnglish:"The gateway starts from a device profile, not from business logic." },
+      { id:"config-validation", title:"配置校验", shortLabel:"Config Validation", businessPurpose:"在打开 Socket 前发现显而易见的配置错误，避免无效网络请求和难以定位的现场故障。", input:"DeviceProfile。", output:"Valid 配置或具体 ConfigError。", technologies:["IPv4/端口范围校验","功能码与 Quantity 上限","地址范围和周期校验"], abnormalCases:["PortOutOfRange","QuantityInvalid","UnsupportedFunctionCode"], relation:"承接 DeviceProfile，只有 Valid 才进入 ConnectionManager；失败时直接输出配置错误。", interviewEnglish:"Configuration is validated before any network transaction starts." },
+      { id:"connection-manager", title:"连接管理", shortLabel:"ConnectionManager", businessPurpose:"为每台设备维护 TCP 502 通道及连接生命周期，隔离断线、重连和旧连接残留。", input:"已校验的设备端点和连接策略。", output:"Connected Socket/TCP Stream 或 NetworkError。", technologies:["TCP connect timeout","连接生命周期","断线探测与资源释放"], abnormalCases:["ConnectTimeout","ConnectionRefused","NetworkUnreachable"], relation:"为 PollingScheduler 与 CommandWriter 提供可用通道；断线时由 RetryReconnectPolicy 驱动恢复。", interviewEnglish:"A TCP connection only means the network path is ready." },
+      { id:"polling-scheduler", title:"轮询调度", shortLabel:"PollingScheduler", businessPurpose:"按周期触发各设备读任务，并保证同一设备事务默认串行，减少响应次序混乱。", input:"PollingInterval、设备状态和待执行写命令。", output:"到期的 ReadJob 或让位给高优先级 WriteCommand。", technologies:["周期任务","同设备串行队列","跨设备并行"], abnormalCases:["任务堆积","上一事务未结束","设备 Offline/Disabled"], relation:"连接就绪后产生读任务，交给 TransactionBuilder；写命令可在安全边界上获得更高优先级。", interviewEnglish:"The scheduler decides when each device should be polled." },
+      { id:"transaction-builder", title:"构建请求", shortLabel:"TransactionBuilder", businessPurpose:"把读写意图编码为带唯一 TransactionId 的 MBAP Header + PDU，形成完整 Modbus TCP ADU。", input:"ReadJob/WriteCommand、DeviceProfile、下一个 TransactionId。", output:"请求 ADU、期望响应描述和当前事务上下文。", technologies:["MBAP 编码","大端字节序","TransactionId 分配"], abnormalCases:["AddressOverflow","QuantityInvalid","编码缓冲区错误"], relation:"承接调度或写命令，将 ADU 和期望响应交给 RequestSender，同时保存匹配上下文。", interviewEnglish:"Each Modbus TCP request should be treated as a transaction." },
+      { id:"request-sender", title:"TCP 发送", shortLabel:"RequestSender", businessPurpose:"把完整 Modbus TCP ADU 写入已连接的 TCP Stream，并追踪是否确实完成发送。", input:"连接、请求 ADU、发送超时。", output:"SendCompleted 或网络层发送错误。", technologies:["TCP Stream 写入","完整缓冲区发送","WriteTimeout"], abnormalCases:["WriteTimeout","SocketClosed","TcpDisconnected"], relation:"发送成功后 ResponseReceiver 开始等帧；写请求若发送结果不确定，不能盲目自动重试。", interviewEnglish:"The request is sent as a Modbus TCP ADU over the TCP stream." },
+      { id:"response-receiver", title:"接收响应", shortLabel:"ResponseReceiver", businessPurpose:"从 TCP 字节流准确拼出一帧响应，而不是把一次 read 调用误当成一帧。", input:"TCP Stream、TimeoutMs。", output:"完整 MBAP + PDU 原始帧或 ReadTimeout。", technologies:["先读 7 字节 MBAP","按 Length 补读剩余 PDU","处理粘包/拆包"], abnormalCases:["ReadTimeout","SocketClosed","FrameTruncated"], relation:"位于 RequestSender 之后，完整帧交给 TransactionId Match；超时转入异常恢复闭环。", interviewEnglish:"The receiver reads the MBAP header first, then reads the remaining frame by length." },
+      { id:"transaction-match", title:"事务匹配", shortLabel:"TransactionId Match", businessPurpose:"确认收到的响应属于当前这一次请求，阻止迟到响应或旧连接残留污染新事务。", input:"当前请求 TID 与响应 MBAP Header 中的 TID。", output:"Match / Mismatch。", technologies:["MBAP Header 解析","请求响应事务管理","迟到响应保护"], abnormalCases:["TransactionIdMismatch","迟到响应","旧响应残留"], relation:"接收响应后、内容解码前的第一道信任边界；Mismatch 时记录原始帧并关闭连接。", interviewEnglish:"The transaction id checks whether this response belongs to the current request." },
+      { id:"response-validator", title:"报文校验", shortLabel:"ResponseValidator", businessPurpose:"确认响应结构和当前请求一致，只有可信的协议帧才允许进入异常识别与数据解码。", input:"匹配事务的原始响应、期望 UnitId/FC/Quantity。", output:"ValidatedFrame 或 ValidationError。", technologies:["ProtocolId=0","Length/UnitId/FC 校验","ByteCount 与 Quantity 一致性"], abnormalCases:["ProtocolIdInvalid","UnitIdMismatch","LengthInvalid","FunctionCodeMismatch","ResponseFormatInvalid"], relation:"承接 TransactionId Match；合法帧进入 ExceptionDetector，不合法帧关闭连接防止后续污染。", interviewEnglish:"The gateway validates the response before decoding any data." },
+      { id:"exception-detector", title:"异常识别", shortLabel:"ExceptionDetector", businessPurpose:"区分正常功能码和带 0x80 的 Modbus 异常响应，并把协议拒绝与网络故障分开。", input:"已通过结构校验的 FunctionCode 与 ExceptionCode。", output:"NormalResponse 或带异常码的 ModbusException。", technologies:["FC | 0x80 识别","ExceptionCode 映射","网络/协议错误分层"], abnormalCases:["01 Illegal Function","02 Illegal Data Address","03 Illegal Data Value","04 Server Device Failure","0A/0B Gateway 异常"], relation:"正常分支交给 RawDataDecoder；异常分支直接形成失败 CommunicationResult，TCP 不一定需要断开。", interviewEnglish:"A Modbus exception means the device replied, but rejected the request." },
+      { id:"raw-decoder", title:"原始数据解码", shortLabel:"RawDataDecoder", businessPurpose:"将响应数据区转换为 bit[] 或 ushort[] 原始块，保留通信语义但不附加温度、压力等业务解释。", input:"正常响应 PDU、功能码、起始地址与数量。", output:"RawRegisterBlock 或 RawCoilBlock。", technologies:["大端 ushort 解码","bit 位展开","数量与 ByteCount 复核"], abnormalCases:["DecodeFailed","ByteCountOdd","InsufficientData"], relation:"只处理已验证的正常响应，输出交给 ResultPublisher；业务 Tag 映射位于 Gateway 之后。", interviewEnglish:"The gateway outputs raw registers, not business meanings." },
+      { id:"result-publisher", title:"通信结果输出", shortLabel:"ResultPublisher", businessPurpose:"把成功、超时、协议异常或校验失败统一封装为上层可消费的标准通信结果。", input:"RawDataBlock 或分类后的 ErrorResult、事务上下文和耗时。", output:"CommunicationResult / RawDataBlock / ErrorResult / WriteResult。", technologies:["结果模型","错误分类","延迟与质量标记"], abnormalCases:["上层消费者缓慢","结果队列满","序列化失败"], relation:"它是 Gateway 与 WPF/MQTT/DB/Tag 层的清晰边界，不负责上层业务动作。", interviewEnglish:"The result is a clean communication output for upper layers." },
+      { id:"health-monitor", title:"健康状态更新", shortLabel:"HealthMonitor", businessPurpose:"每次事务后更新设备可通信性，使调度与上层能看见 Connected、Degraded、Offline 等状态。", input:"CommunicationResult、连续成功/失败计数与时间戳。", output:"状态、ConsecutiveFailures、LastSuccessAt/LastError。", technologies:["有限状态机","失败阈值","成功恢复"], abnormalCases:["连续失败进入 Offline","单次失败进入 Degraded","设备 Disabled"], relation:"接收每轮结果；失败时通知 RetryReconnectPolicy，成功时把失败计数清零并恢复 Polling。", interviewEnglish:"The gateway updates device health after every transaction." },
+      { id:"retry-reconnect", title:"重试与重连", shortLabel:"RetryReconnectPolicy", businessPurpose:"在超时或断线后关闭不可信连接、控制本轮重试次数，并按间隔恢复 TCP 与轮询。", input:"NetworkError、失败计数、RetryCount、ReconnectIntervalMs。", output:"RetryJob、Reconnecting 状态、恢复连接或本轮放弃。", technologies:["退避/固定间隔","旧连接关闭","读事务安全重试"], abnormalCases:["重连仍失败","达到 RetryCount","NetworkUnreachable"], relation:"连接失败或接收超时后介入，恢复后回到 PollingScheduler；关闭连接可隔离迟到响应。", interviewEnglish:"After a timeout, closing the connection prevents late responses from corrupting the next transaction." },
+      { id:"command-writer", title:"写命令", shortLabel:"CommandWriter", businessPurpose:"接收上层 WriteCommand，检查在线状态并在当前读事务结束后以高优先级发起 FC06 写事务。", input:"CommandId、DeviceId、Address、Value、Confirmation 策略。", output:"写事务请求或 DeviceOffline/TcpDisconnected。", technologies:["高优先级队列","与读事务串行化","写重试幂等风险"], abnormalCases:["DeviceOffline","TcpDisconnected","WriteTimeout","发送状态不确定"], relation:"写命令通过 TransactionBuilder/RequestSender 复用通信管线，响应必须交给 WriteAckValidator。", interviewEnglish:"Write requests share the same transaction rules but need stricter retry decisions." },
+      { id:"write-ack", title:"写响应确认", shortLabel:"WriteAckValidator", businessPurpose:"验证 FC06 响应回显的 Address 和 Value 与请求完全一致，证明设备在协议层接受了写命令。", input:"写请求上下文与 FC06 响应 PDU。", output:"ProtocolAcknowledged 或 WriteEchoMismatch/ModbusException。", technologies:["FC06 回显校验","事务匹配","写结果不确定性"], abnormalCases:["WriteEchoMismatch","IllegalDataAddress","WriteTimeout"], relation:"位于写响应接收/通用校验之后；协议确认可直接返回，或继续 ReadBackConfirm。", interviewEnglish:"A write command is complete only after the gateway receives a valid acknowledgement." },
+      { id:"readback-confirm", title:"可选读回确认", shortLabel:"ReadBackConfirm", businessPurpose:"在配置要求更严格确认时，再用 FC03 读取目标地址并比较原始值，验证最终设备状态。", input:"已 ProtocolAcknowledged 的写命令、目标地址和值。", output:"Confirmed、ReadBackMismatch 或 ReadBackNotSupported。", technologies:["二次独立读事务","原始值比较","设备能力判断"], abnormalCases:["ReadBackMismatch","ReadBackNotSupported","读回超时"], relation:"承接 WriteAckValidator，是可选的强确认；结果统一由 ResultPublisher 输出 WriteResult。", interviewEnglish:"Read-back confirmation checks the final value with a new read transaction." },
+      { id:"communication-log", title:"通信日志", shortLabel:"CommunicationLog", businessPurpose:"记录连接、TX/RX、TID、异常分类、重试与恢复轨迹，为调试和审计保留可追溯证据。", input:"各节点产生的结构化事件和必要的原始帧。", output:"带级别、时间、设备、事务的通信日志。", technologies:["结构化日志","原始报文留存","敏感信息与滚动策略"], abnormalCases:["日志磁盘满","日志洪泛","时间戳不一致"], relation:"横切所有通信节点；它观察闭环但不改变事务结果。", interviewEnglish:"Communication logs make every transaction and recovery decision traceable." }
+    ];
+
+    const exceptionGroups = {
+      network:["ConnectTimeout","ConnectionRefused","NetworkUnreachable","ReadTimeout","WriteTimeout","SocketClosed","TcpDisconnected"],
+      modbus:["IllegalFunction","IllegalDataAddress","IllegalDataValue","ServerDeviceFailure","GatewayPathUnavailable","GatewayTargetDeviceFailedToRespond"],
+      validation:["TransactionIdMismatch","ProtocolIdInvalid","UnitIdMismatch","LengthInvalid","FunctionCodeMismatch","ResponseFormatInvalid","DecodeFailed"]
+    };
+
+    const animationSteps = [
+      {nodeId:"device-profile", title:"加载 DeviceProfile：通信从配置开始", status:"ConfigLoaded", tx:"—", deviceState:"Disconnected", connection:"Disconnected", log:"[INFO] Load DeviceProfile for plc-line-01", type:"info", detail:"加载设备 IP、Port、UnitId、功能码、地址、数量、周期、超时与重试策略。", english:"The gateway starts from a device profile, not from business logic.", action:"config"},
+      {nodeId:"config-validation", title:"校验 IP、端口、功能码、地址与数量", status:"ConfigValid", tx:"—", deviceState:"Disconnected", connection:"Disconnected", log:"[OK] DeviceProfile validation passed", type:"ok", detail:"在联网前排除无效配置；Quantity=10 对 FC03 合法。", english:"Configuration is validated before any network transaction starts."},
+      {nodeId:"connection-manager", title:"打开 192.168.1.20:502 TCP 通道", status:"Connecting", tx:"—", deviceState:"Connecting", connection:"Connecting", log:"[INFO] Connecting 192.168.1.20:502 ...", type:"info", detail:"Connecting 阶段可能出现 ConnectTimeout、ConnectionRefused 或 NetworkUnreachable。", english:"A TCP connection only means the network path is ready.", action:"connecting"},
+      {nodeId:"connection-manager", title:"TCP 连接建立，但尚未证明 Modbus 请求正确", status:"Connected", tx:"—", deviceState:"Connected", connection:"Connected", log:"[INFO] Connect 192.168.1.20:502 success", type:"ok", detail:"Socket 已可用；协议地址、功能码和响应正确性还需后续事务证明。", english:"A TCP connection only means the network path is ready.", action:"connected"},
+      {nodeId:"polling-scheduler", title:"PollingScheduler 触发 1000 ms 周期读任务", status:"Polling", tx:"—", deviceState:"Polling", connection:"Connected", log:"[INFO] Polling job due for plc-line-01", type:"info", detail:"同设备默认串行、不同设备可并行；写命令会在事务边界获得高优先级。", english:"The scheduler decides when each device should be polled."},
+      {nodeId:"transaction-builder", title:"分配 TID=1001，组装 MBAP + FC03 PDU", status:"BuildingRequest", tx:"1001", deviceState:"Polling", connection:"Connected", log:"[TX] TID=1001 FC03 Start=0 Qty=10", type:"tx", detail:"MBAP: TID=1001, PID=0, Length=6, UnitId=1；PDU: FC03, Start=0, Qty=10。", english:"Each Modbus TCP request should be treated as a transaction.", action:"build-read", request:"03 E9 00 00 00 06 01 03 00 00 00 0A"},
+      {nodeId:"request-sender", title:"RequestSender 写入完整 Modbus TCP ADU", status:"Sending", tx:"1001", deviceState:"Polling", connection:"Connected", log:"[TX] 03 E9 00 00 00 06 01 03 00 00 00 0A", type:"tx", detail:"请求以 ADU 写入 TCP Stream；发送阶段可能遇到 WriteTimeout、SocketClosed、TcpDisconnected。", english:"The request is sent as a Modbus TCP ADU over the TCP stream.", action:"send-read"},
+      {nodeId:"response-receiver", title:"先读 7 字节 MBAP，再按 Length 补齐 PDU", status:"Receiving", tx:"1001", deviceState:"Polling", connection:"Connected", log:"[RX] Read 7-byte MBAP, then 22-byte PDU by Length", type:"rx", detail:"TCP 是字节流，可能拆包或粘包；一次 read 并不等于一帧。", english:"The receiver reads the MBAP header first, then reads the remaining frame by length.", action:"receive-read", response:"03 E9 00 00 00 17 01 03 14 00 01 00 FA 00 00 00 00 00 10 00 03 00 08 00 09 00 00 00 01"},
+      {nodeId:"transaction-match", title:"响应 TID=1001 与当前请求匹配", status:"Matching", tx:"1001", deviceState:"Polling", connection:"Connected", log:"[OK] TransactionId request=1001 response=1001 match", type:"ok", detail:"只有属于当前事务的响应才能继续；Mismatch 会关闭连接隔离迟到帧。", english:"The transaction id tells whether the response belongs to the current request."},
+      {nodeId:"response-validator", title:"校验 PID / Length / UnitId / FC / ByteCount", status:"Validating", tx:"1001", deviceState:"Polling", connection:"Connected", log:"[OK] MBAP, UnitId, FC03, Length and ByteCount validated", type:"ok", detail:"PID=0、UnitId=1、FC03、ByteCount=20，与 Quantity=10 完全一致。", english:"The gateway validates the response before decoding any data.", action:"validated"},
+      {nodeId:"exception-detector", title:"FunctionCode=03：进入正常响应分支", status:"NormalResponse", tx:"1001", deviceState:"Polling", connection:"Connected", log:"[OK] Normal response FC03; no Modbus exception", type:"ok", detail:"若功能码为 0x83，则读取 ExceptionCode 而不是解码寄存器数据。", english:"A Modbus exception means the device replied, but rejected the request.", action:"normal"},
+      {nodeId:"raw-decoder", title:"解码 ushort[10] 原始寄存器块", status:"Decoding", tx:"1001", deviceState:"Polling", connection:"Connected", log:"[OK] Decode ushort[10] and publish RawRegisterBlock", type:"ok", detail:"Values=[1,250,0,0,16,3,8,9,0,1]；不解释温度、压力、速度或报警。", english:"The gateway outputs raw registers, not business meanings.", action:"decode"},
+      {nodeId:"result-publisher", title:"发布标准 CommunicationResult", status:"Success", tx:"1001", deviceState:"Polling", connection:"Connected", log:"[OK] CommunicationResult Success latency=23ms", type:"ok", detail:"上层收到干净的通信结果；UI、MQTT、DB、Tag 映射属于后续业务层。", english:"The result is a clean communication output for upper layers.", action:"publish"},
+      {nodeId:"health-monitor", title:"成功后清零失败计数并保持 Polling", status:"Healthy", tx:"1001", deviceState:"Polling", connection:"Connected", log:"[OK] ConsecutiveFailures=0 LastSuccessAt=now State=Polling", type:"ok", detail:"每次事务都会反馈到设备健康状态机。", english:"The gateway updates device health after every transaction.", action:"healthy"},
+      {nodeId:"request-sender", title:"下一轮发送 TID=1002 FC03 请求", status:"Sending", tx:"1002", deviceState:"Polling", connection:"Connected", log:"[TX] TID=1002 FC03 Start=0 Qty=10", type:"tx", detail:"演示一次请求已发送但没有在 TimeoutMs 内收到完整响应。", english:"The request is sent as a Modbus TCP ADU over the TCP stream.", action:"send-timeout", request:"03 EA 00 00 00 06 01 03 00 00 00 0A"},
+      {nodeId:"response-receiver", title:"ReadTimeout：请求 token 变红并停在链路中", status:"Timeout", tx:"1002", deviceState:"Degraded", connection:"Timeout", log:"[WARN] Read timeout, retry 1/2", type:"warn", detail:"本轮 CommunicationResult=Timeout，ConsecutiveFailures+1；不能让迟到响应进入下一事务。", english:"A timeout means no complete response arrived in time.", action:"timeout", exception:"ReadTimeout"},
+      {nodeId:"retry-reconnect", title:"关闭当前连接，准备 Retry 1/2", status:"Retry", tx:"1002", deviceState:"Degraded", connection:"Disconnected", log:"[ERROR] Close TCP connection to isolate possible late response", type:"error", detail:"读请求通常可重试；先关闭连接，清空旧字节流和迟到响应风险。", english:"After a timeout, closing the connection prevents late responses from corrupting the next transaction.", action:"retry", retry:"1 / 2"},
+      {nodeId:"retry-reconnect", title:"等待 5000 ms 后进入 Reconnecting", status:"Reconnecting", tx:"—", deviceState:"Offline", connection:"Reconnecting", log:"[RECONNECT] Waiting 5000 ms before reconnect", type:"warn", detail:"连续失败可从 Degraded 进入 Offline；倒计时后创建全新 TCP 连接。", english:"The reconnect policy creates a clean channel before polling resumes.", action:"reconnecting", reconnect:"5.0s"},
+      {nodeId:"connection-manager", title:"重连成功，TCP 通道恢复", status:"Connected", tx:"—", deviceState:"Connected", connection:"Connected", log:"[INFO] Reconnect 192.168.1.20:502 success", type:"ok", detail:"旧连接已被替换，新流中不存在上一事务的残留字节。", english:"A fresh connection isolates the next transaction from late data.", action:"reconnected", retry:"0 / 2"},
+      {nodeId:"polling-scheduler", title:"恢复轮询，设备状态回到 Polling", status:"PollingRestored", tx:"1003", deviceState:"Polling", connection:"Connected", log:"[OK] Polling restored with TID=1003", type:"ok", detail:"重连后的读事务成功，ConsecutiveFailures 清零、状态灯恢复绿色。", english:"Polling resumes after the connection and transaction both recover.", action:"restore", request:"03 EB 00 00 00 06 01 03 00 00 00 0A"},
+      {nodeId:"command-writer", title:"上层提交高优先级 FC06 WriteCommand", status:"WriteCommand", tx:"—", deviceState:"Polling", connection:"Connected", log:"[INFO] Queue cmd-20260703-0001 FC06 Address=10 Value=1", type:"info", detail:"设备在线；写命令等待当前读事务结束，然后进入同设备串行管线。", english:"Write requests share the same transaction rules but need stricter retry decisions.", action:"write-command"},
+      {nodeId:"request-sender", title:"发送 TID=2001 FC06 写单寄存器请求", status:"Writing", tx:"2001", deviceState:"Polling", connection:"Connected", log:"[TX] TID=2001 FC06 Address=10 Value=1", type:"tx", detail:"写命令使用不同 token；若发送结果不确定，不可盲目重试，因为第一次可能已到达设备。", english:"Write retries must be careful because the first command may already have reached the device.", action:"send-write", request:"07 D1 00 00 00 06 01 06 00 0A 00 01"},
+      {nodeId:"write-ack", title:"FC06 响应回显 Address=10、Value=1", status:"WriteAck", tx:"2001", deviceState:"Polling", connection:"Connected", log:"[RX] TID=2001 FC06 echo Address=10 Value=1", type:"rx", detail:"TransactionId、功能码、地址和值均匹配，得到 ProtocolAcknowledged。", english:"A write command is complete only after the gateway receives a valid acknowledgement.", action:"write-ack", response:"07 D1 00 00 00 06 01 06 00 0A 00 01"},
+      {nodeId:"readback-confirm", title:"可选 FC03 读回地址 10，原始值=1", status:"ReadBackConfirm", tx:"2002", deviceState:"Polling", connection:"Connected", log:"[TX/RX] ReadBack TID=2002 Address=10 Value=1", type:"ok", detail:"这是新的独立读事务；原始值与命令值一致，确认最终设备状态。", english:"Read-back confirmation checks the final value with a new read transaction.", action:"readback", request:"07 D2 00 00 00 06 01 03 00 0A 00 01", response:"07 D2 00 00 00 05 01 03 02 00 01"},
+      {nodeId:"result-publisher", title:"返回 WriteResult = Confirmed", status:"WriteConfirmed", tx:"2002", deviceState:"Polling", connection:"Connected", log:"[OK] Command cmd-20260703-0001 WriteConfirmed", type:"ok", detail:"协议回显与读回均通过。异常可能包括 DeviceOffline、WriteTimeout、WriteEchoMismatch、ReadBackMismatch、ReadBackNotSupported。", english:"The write result reports protocol acknowledgement and optional read-back confirmation.", action:"write-confirmed"},
+      {nodeId:"exception-detector", title:"演示 Modbus 异常：0x83 / 02 Illegal Data Address", status:"ModbusException", tx:"3001", deviceState:"Degraded", connection:"Connected", log:"[ERROR] TID=3001 FC83 Exception=02 Illegal Data Address", type:"error", detail:"设备已经回复，但拒绝执行地址请求。记录异常码并返回 ModbusException；TCP 不一定断开。", english:"A Modbus exception means the device replied, but rejected the request.", action:"modbus-exception", response:"0B B9 00 00 00 03 01 83 02", exception:"IllegalDataAddress"},
+      {nodeId:"transaction-match", title:"演示校验异常：响应 TID=9999 ≠ 请求 TID=3002", status:"ValidationError", tx:"3002", deviceState:"Degraded", connection:"Disconnected", log:"[ERROR] TransactionId mismatch, close connection", type:"error", detail:"不相信响应、记录原始帧、返回 ValidationError 并关闭连接，防止旧响应污染下一事务。", english:"A mismatched transaction id makes the response untrusted.", action:"validation-error", response:"27 0F 00 00 00 05 01 03 02 00 01", exception:"TransactionIdMismatch"},
+      {nodeId:"communication-log", title:"闭环完成：结果、状态、异常恢复与日志均可追溯", status:"LoopCompleted", tx:"—", deviceState:"Connected", connection:"Connected", log:"[OK] Modbus TCP Gateway communication loop completed", type:"ok", detail:"通信事务层稳定完成读、校验、原始输出、恢复、写确认和分类错误记录。", english:"A Modbus TCP gateway is a stable transaction layer between field devices and upper software systems.", action:"final"}
+    ];
+
+    let masterTimeline;
+    let currentStep = -1;
+    let manualMode = false;
+    const $ = (id) => document.getElementById(id);
+    const requestDefault = "03 E9 00 00 00 06 01 03 00 00 00 0A";
+    const responseDefault = "03 E9 00 00 00 17 01 03 14 00 01 00 FA 00 00 00 00 00 10 00 03 00 08 00 09 00 00 00 01";
+
+    function renderProfile() {
+      $("profileGrid").innerHTML = Object.entries(profile).map(([k,v]) => `<div class="kv"><span>${k}</span><b>${v}</b></div>`).join("");
+    }
+
+    // 数据驱动渲染 18 个闭环节点。
+    function renderFlowNodes() {
+      const host = $("flowScroll");
+      host.querySelectorAll(".flow-node").forEach(el => el.remove());
+      flowNodes.forEach((node,index) => {
+        const el = document.createElement("div");
+        el.className = "flow-node";
+        el.id = `node-${node.id}`;
+        el.setAttribute("role","button");
+        el.setAttribute("tabindex","0");
+        el.setAttribute("aria-label",`${node.title} ${node.shortLabel} 技术详情`);
+        el.innerHTML = `<span class="flow-num">${String(index+1).padStart(2,"0")}</span><div class="flow-copy"><strong>${node.title}</strong><span>${node.shortLabel}</span></div><span class="node-state">WAIT</span>`;
+        el.addEventListener("click", () => showNodeDetail(node.id, true));
+        el.addEventListener("keydown", event => { if (["Enter"," "].includes(event.key)) { event.preventDefault(); showNodeDetail(node.id,true); }});
+        host.appendChild(el);
+      });
+    }
+
+    function detailField(label, content, wide=false) {
+      const html = Array.isArray(content) ? `<ul>${content.map(x=>`<li>${x}</li>`).join("")}</ul>` : `<p>${content}</p>`;
+      return `<div class="detail-field ${wide?"wide":""}"><label>${label}</label>${html}</div>`;
+    }
+
+    // 点击节点弹出具体输入、输出、异常与前后关系。
+    function showNodeDetail(nodeId, openModal=false) {
+      const node = flowNodes.find(n => n.id === nodeId);
+      if (!node) return;
+      $("detailPreview").innerHTML = `<div class="section-label">CURRENT NODE DETAIL</div><h3>${node.title} · ${node.shortLabel}</h3><div class="preview-purpose">${node.businessPurpose}</div><div class="english">${node.interviewEnglish}</div><div class="click-hint">点击任一流程节点查看完整输入 / 输出 / 技术 / 异常 / 前后关系</div>`;
+      if (!openModal) return;
+      $("modalTitle").textContent = `${node.title} · ${node.shortLabel}`;
+      $("modalBody").innerHTML = [
+        detailField("业务作用",node.businessPurpose,true), detailField("输入",node.input), detailField("输出",node.output),
+        detailField("关键技术",node.technologies), detailField("常见异常或判断条件",node.abnormalCases),
+        detailField("和前后节点的关系",node.relation,true), detailField("SIMPLE TECHNICAL ENGLISH",node.interviewEnglish,true)
+      ].join("");
+      $("detailModal").classList.add("open");
+    }
+
+    // 激活流程节点，并将通信事务 token 移到当前处理环节。
+    function activateNode(nodeId, tx="—") {
+      const index = flowNodes.findIndex(n => n.id === nodeId);
+      document.querySelectorAll(".flow-node").forEach((el,i) => {
+        el.classList.toggle("active", i===index);
+        el.classList.toggle("done", i<index);
+        el.querySelector(".node-state").textContent = i===index ? "ACTIVE" : i<index ? "OK" : "WAIT";
+      });
+      const target = $(`node-${nodeId}`);
+      if (!target) return;
+      target.scrollIntoView({block:"nearest",behavior:"smooth"});
+      setTimeout(() => {
+        const hostRect = $("flowScroll").getBoundingClientRect();
+        const rect = target.getBoundingClientRect();
+        const x = rect.left - hostRect.left - 25;
+        const y = rect.top - hostRect.top + $("flowScroll").scrollTop + rect.height/2 - 7;
+        $("flowToken").textContent = tx === "—" ? "cfg" : `tx${tx}`;
+        gsap.to($("flowToken"), {x,y,duration:.55,ease:"power2.inOut"});
+      }, 80);
+    }
+
+    function setStateMachine(state) {
+      document.querySelectorAll(".state-chip").forEach(el => el.classList.toggle("active", el.dataset.state===state));
+    }
+
+    function setDeviceVisual(state) {
+      const plc = $("plc");
+      const dot = plc.querySelector(".status-dot");
+      plc.classList.remove("offline","degraded"); dot.className="status-dot";
+      if (state==="Offline") { plc.classList.add("offline"); dot.classList.add("offline"); }
+      else if (["Degraded","Timeout"].includes(state)) { plc.classList.add("degraded"); dot.classList.add("degraded"); }
+      else dot.classList.add("online");
+      $("fieldDeviceState").textContent = state;
+    }
+
+    function setLineState(mode="active") {
+      const line=$("line-plc"); line.classList.remove("active","error","reconnecting");
+      if (mode) line.classList.add(mode);
+    }
+
+    function markException(name) {
+      document.querySelectorAll(".ex-list i").forEach(el => el.classList.toggle("hot", el.textContent===name));
+    }
+
+    function updateProtocol(step) {
+      const isWrite = ["send-write","write-ack"].includes(step.action);
+      const isReadback = step.action==="readback";
+      $("mbapTid").textContent = step.tx;
+      $("tidValue").textContent = step.tx;
+      $("mbapLen").textContent = step.action==="receive-read" ? "23" : isReadback && step.response ? "5" : "6";
+      $("pduFc").textContent = step.action==="modbus-exception" ? "83" : isWrite ? "06" : "03";
+      $("pduAddr").textContent = isWrite || isReadback ? "10" : "0";
+      $("pduQty").textContent = isWrite ? "Value = 1" : isReadback ? "1" : "10";
+      $("pduBytes").textContent = step.action==="receive-read" || ["validated","normal","decode","publish","healthy"].includes(step.action) ? "20" : isReadback ? "2" : step.action==="modbus-exception" ? "—" : "—";
+      if (step.request) $("requestHex").textContent=step.request;
+      if (step.response) $("responseHex").textContent=step.response;
+      if (step.action==="timeout") { $("responseHex").textContent="— ReadTimeout: no complete frame —"; $("responseHex").classList.add("error"); }
+      else $("responseHex").classList.toggle("error", ["modbus-exception","validation-error"].includes(step.action));
+    }
+
+    // 同步当前步骤的状态卡片、协议字段、现场灯和说明。
+    function updateStatus(step) {
+      $("stepTitle").textContent = step.title;
+      $("stepCount").textContent = `${currentStep+1} / ${animationSteps.length}`;
+      $("progressBar").style.width = `${((currentStep+1)/animationSteps.length)*100}%`;
+      $("txBadge").textContent = step.tx==="—" ? "tx —" : `tx-${step.tx}`;
+      $("deviceBadge").textContent = "plc-line-01";
+      $("statusBadge").textContent = step.status;
+      $("connectionState").textContent = step.connection;
+      $("tcpChannel").textContent = step.connection;
+      $("activeAdu").textContent = step.tx==="—" ? "—" : `TID ${step.tx}`;
+      const color = ["Timeout","Disconnected"].includes(step.connection) ? "var(--red)" : step.connection==="Reconnecting" ? "var(--yellow)" : step.connection==="Connecting" ? "var(--cyan)" : "var(--green)";
+      $("connectionDot").style.background=color; $("connectionDot").style.color=color;
+      setDeviceVisual(step.deviceState); setStateMachine(step.deviceState); updateProtocol(step);
+      showNodeDetail(step.nodeId); activateNode(step.nodeId,step.tx);
+      $("plc").classList.add("active");
+      $("resultStatus").textContent = ["Timeout","ModbusException","ValidationError"].includes(step.status) ? step.status : step.status==="WriteConfirmed" ? "WriteConfirmed" : step.status==="Success" ? "Success" : "Pending";
+      $("resultStatus").style.color = ["Timeout","ModbusException","ValidationError"].includes(step.status) ? "var(--red)" : step.status==="WriteConfirmed" ? "var(--purple)" : "var(--green)";
+      if (step.exception) { $("errorValue").textContent=step.exception; markException(step.exception); }
+      else { $("errorValue").textContent="None"; markException(""); }
+      if (step.action==="publish") $("latencyValue").textContent="23";
+    }
+
+    // 添加带级别的通信日志并保持窗口滚动到底部。
+    function appendLog(text, type="info") {
+      const row=document.createElement("div"); row.className=`log-row ${type}`; row.textContent=text;
+      $("logWindow").appendChild(row); $("logWindow").scrollTop=$("logWindow").scrollHeight;
+    }
+
+    // 在现场拓扑的两个设备之间移动请求、响应或写命令 token。
+    function movePacket(from, to, type="request", partial=false) {
+      const stage=$("fieldStage"), token=$("packetToken"), a=$(from).getBoundingClientRect(), b=$(to).getBoundingClientRect(), s=stage.getBoundingClientRect();
+      const start={x:a.left-s.left+a.width/2-27,y:a.top-s.top+a.height/2-8};
+      const end={x:b.left-s.left+b.width/2-27,y:b.top-s.top+b.height/2-8};
+      if (partial) { end.x=start.x+(end.x-start.x)*.58; end.y=start.y+(end.y-start.y)*.58; }
+      token.className=`packet-token ${type}`; token.textContent=type==="response"?"RX OK":type==="write"?"FC06 WRITE":type==="timeout"?"TIMEOUT":"FC03 TX";
+      gsap.killTweensOf(token); gsap.set(token,{x:start.x,y:start.y,opacity:1,scale:.85});
+      gsap.to(token,{x:end.x,y:end.y,scale:1,duration:1.15,ease:"power1.inOut",onComplete:()=>{ if(!partial) gsap.to(token,{opacity:0,duration:.35,delay:.3}); }});
+    }
+
+    function runAction(step) {
+      switch(step.action) {
+        case "config": gsap.fromTo($("profileGrid"),{opacity:.2,y:8},{opacity:1,y:0,duration:.6}); break;
+        case "connecting": setLineState("reconnecting"); break;
+        case "connected": setLineState("active"); break;
+        case "build-read": $("requestHex").textContent=step.request; break;
+        case "send-read": movePacket("gateway","plc","request"); break;
+        case "receive-read": movePacket("plc","gateway","response"); break;
+        case "validated": gsap.fromTo([$("mbapTid"),$("mbapPid"),$("mbapLen"),$("mbapUid")],{backgroundColor:"rgba(52,211,153,.5)"},{backgroundColor:"transparent",duration:1.2}); break;
+        case "decode": $("rawBlock").textContent="RawRegisterBlock { DeviceId: plc-line-01, FC:03, Start:0, Values:[1, 250, 0, 0, 16, 3, 8, 9, 0, 1], Quality:Good }"; break;
+        case "publish": $("resultStatus").textContent="Success"; $("latencyValue").textContent="23"; break;
+        case "healthy": $("retryValue").textContent="0 / 2"; break;
+        case "send-timeout": movePacket("gateway","plc","request"); break;
+        case "timeout": movePacket("gateway","plc","timeout",true); setLineState("error"); $("retryValue").textContent="1 / 2"; break;
+        case "retry": setLineState("error"); $("retryValue").textContent=step.retry; break;
+        case "reconnecting": setLineState("reconnecting"); startReconnectCountdown(); break;
+        case "reconnected": setLineState("active"); $("reconnectValue").textContent="Ready"; $("retryValue").textContent="0 / 2"; break;
+        case "restore": movePacket("gateway","plc","request"); setLineState("active"); break;
+        case "write-command": movePacket("upper-system","gateway","write"); break;
+        case "send-write": movePacket("gateway","plc","write"); break;
+        case "write-ack": movePacket("plc","gateway","response"); break;
+        case "readback": movePacket("gateway","plc","request"); setTimeout(()=>movePacket("plc","gateway","response"),950); break;
+        case "write-confirmed": $("resultStatus").textContent="WriteConfirmed"; $("rawBlock").textContent="WriteResult { CommandId:cmd-20260703-0001, ProtocolAcknowledged:true, ReadBackValue:1, Status:Confirmed }"; break;
+        case "modbus-exception": movePacket("plc","gateway","timeout"); break;
+        case "validation-error": setLineState("error"); break;
+        case "final": setLineState("active"); setTimeout(()=>$("finalOverlay").classList.add("show"),650); break;
+      }
+    }
+
+    function startReconnectCountdown() {
+      const obj={n:5}; gsap.killTweensOf(obj); gsap.to(obj,{n:0,duration:2.4,ease:"none",onUpdate:()=>$("reconnectValue").textContent=`${obj.n.toFixed(1)}s`});
+    }
+
+    // 执行一个分镜：八个区域同时更新。
+    function runStep(index) {
+      if (index<0 || index>=animationSteps.length) return;
+      currentStep=index; const step=animationSteps[index]; updateStatus(step); appendLog(step.log,step.type); runAction(step);
+      gsap.fromTo($("detailPreview"),{opacity:.35,x:6},{opacity:1,x:0,duration:.35});
+    }
+
+    // 使用 GSAP timeline 严格按业务顺序组织所有分镜。
+    function buildTimeline() {
+      if (masterTimeline) masterTimeline.kill();
+      masterTimeline=gsap.timeline({paused:true});
+      animationSteps.forEach((step,index)=>{
+        masterTimeline.call(()=>runStep(index));
+        masterTimeline.to({}, {duration: index===0 ? 2.1 : 2.75});
+      });
+      masterTimeline.eventCallback("onComplete",()=>{ currentStep=animationSteps.length-1; });
+      return masterTimeline;
+    }
+
+    function nextStep() {
+      manualMode=true; masterTimeline.pause();
+      const next=Math.min(currentStep+1,animationSteps.length-1); runStep(next);
+      if (next===animationSteps.length-1) setTimeout(()=>$("finalOverlay").classList.add("show"),500);
+    }
+
+    function resetView() {
+      currentStep=-1; $("logWindow").innerHTML=""; $("requestHex").textContent="— waiting for request —"; $("responseHex").textContent="— waiting for response —";
+      $("rawBlock").textContent="RawRegisterBlock { Values: [—], Quality: Unknown }"; $("resultStatus").textContent="Pending"; $("latencyValue").textContent="—"; $("errorValue").textContent="None";
+      $("retryValue").textContent="0 / 2"; $("reconnectValue").textContent="—"; $("stepCount").textContent=`0 / ${animationSteps.length}`; $("progressBar").style.width="0";
+      $("finalOverlay").classList.remove("show"); setLineState("active"); markException("");
+    }
+
+    function restartAnimation(autoPlay=true) {
+      resetView(); buildTimeline(); if(autoPlay) masterTimeline.play(0);
+    }
+
+    function renderExceptions() {
+      Object.entries(exceptionGroups).forEach(([group,items]) => { $(`${group}Exceptions`).innerHTML=items.map(x=>`<i>${x}</i>`).join(""); });
+    }
+
+    function renderStateMachine() {
+      $("stateMachine").innerHTML=["Disconnected","Connecting","Connected","Polling","Degraded","Offline","Reconnecting","Disabled"].map(s=>`<span class="state-chip" data-state="${s}">${s}</span>`).join("");
+    }
+
+    function init() {
+      renderProfile(); renderFlowNodes(); renderExceptions(); renderStateMachine(); showNodeDetail("device-profile"); buildTimeline();
+      $("playBtn").addEventListener("click",()=>{ if(masterTimeline.progress()===1) restartAnimation(true); else masterTimeline.play(); });
+      $("pauseBtn").addEventListener("click",()=>masterTimeline.pause());
+      $("restartBtn").addEventListener("click",()=>restartAnimation(true));
+      $("nextBtn").addEventListener("click",nextStep);
+      $("modalClose").addEventListener("click",()=>$("detailModal").classList.remove("open"));
+      $("detailModal").addEventListener("click",e=>{if(e.target===$("detailModal")) $("detailModal").classList.remove("open");});
+      $("finalClose").addEventListener("click",()=>$("finalOverlay").classList.remove("show"));
+      $("finalRestart").addEventListener("click",()=>restartAnimation(true));
+      document.addEventListener("keydown",e=>{if(e.key==="Escape"){ $("detailModal").classList.remove("open"); $("finalOverlay").classList.remove("show"); }});
+      appendLog("[READY] Click Play or Step Next to start the communication loop","info");
+      setStateMachine("Disconnected");
+    }
+    window.addEventListener("DOMContentLoaded",init);
+  </script>
+</body>
+</html>

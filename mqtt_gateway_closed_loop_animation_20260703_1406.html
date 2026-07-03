@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="工业 MQTT Gateway 通信可靠性闭环交互动画：上线、遥测、命令、配置、ACK、异常、重连与有界离线缓存。" />
+  <title>工业 MQTT Gateway 通信可靠性闭环动画</title>
+  <!-- 文件生成时间：2026-07-03 14:06（Asia/Shanghai，读取自系统时间） -->
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+  <script>
+    /* GSAP CDN 不可用时的轻量兼容层：保留核心演示与按钮控制。 */
+    if (!window.gsap) {
+      (() => {
+        const reserved = new Set(["duration", "delay", "ease", "onComplete", "onUpdate", "attr"]);
+        const els = target => target instanceof Element ? [target] : Array.from(target || []);
+        const apply = (el, vars) => {
+          const x = vars.x ?? Number(el.dataset.fx || 0), y = vars.y ?? Number(el.dataset.fy || 0);
+          const scale = vars.scale ?? Number(el.dataset.fs || 1);
+          if ("x" in vars) el.dataset.fx = x; if ("y" in vars) el.dataset.fy = y; if ("scale" in vars) el.dataset.fs = scale;
+          if ("x" in vars || "y" in vars || "scale" in vars) el.style.transform = `translate(${x}px,${y}px) scale(${scale})`;
+          Object.entries(vars).forEach(([k,v]) => {
+            if (!reserved.has(k) && !["x","y","scale"].includes(k)) el.style[k] = typeof v === "number" && k !== "opacity" ? `${v}px` : v;
+          });
+        };
+        const tween = (target, from, to) => {
+          els(target).forEach(el => {
+            if (from) apply(el, from);
+            const delay = (to.delay || 0) * 1000, duration = (to.duration || 0) * 1000;
+            setTimeout(() => {
+              el.style.transition = `all ${duration}ms ease`;
+              requestAnimationFrame(() => apply(el, to));
+              setTimeout(() => { el.style.transition = ""; to.onComplete?.(); }, duration);
+            }, delay);
+          });
+          return target;
+        };
+        class MiniTimeline {
+          constructor(opts={}) { this.items=[]; this.labels={}; this.t=0; this.cursor=0; this.paused=true; this.timer=null; this.onDone=opts.onComplete; }
+          addLabel(name) { this.labels[name]=this.t; return this; }
+          call(fn) { this.items.push({time:this.t,fn}); return this; }
+          to(_target, vars) { this.t += Number(vars.duration || 0); return this; }
+          play() { this.paused=false; this.run(); return this; }
+          pause() { this.paused=true; clearTimeout(this.timer); return this; }
+          restart() { this.seek(0); return this.play(); }
+          kill() { this.pause(); this.items=[]; return this; }
+          seek(value) { this.pause(); this.cursor=typeof value === "string" ? (this.labels[value] || 0) : Number(value || 0); return this; }
+          eventCallback(name, fn) { if (name === "onComplete") this.onDone=fn; return this; }
+          run() {
+            if (this.paused) return;
+            const next=this.items.find(i => i.time >= this.cursor - .0001);
+            if (!next) { this.onDone?.(); return; }
+            const delay=Math.max(0,(next.time-this.cursor)*1000);
+            this.timer=setTimeout(() => { if(this.paused)return; this.cursor=next.time+.001; next.fn(); this.run(); },delay);
+          }
+        }
+        window.gsap={
+          timeline:opts=>new MiniTimeline(opts),
+          to:(t,v)=>tween(t,null,v), fromTo:(t,f,v)=>tween(t,f,v), set:(t,v)=>{els(t).forEach(e=>apply(e,v));},
+          killTweensOf:()=>{}
+        };
+      })();
+    }
+  </script>
+  <style>
+    :root {
+      --bg:#050c13; --panel:#0a1823; --panel2:#0d2130; --panel3:#0a1c29;
+      --line:#18394b; --line2:#25556b; --text:#d8ebf2; --muted:#7895a4;
+      --cyan:#2dd4e8; --blue:#4b8eff; --green:#35d49a; --yellow:#f4c451;
+      --orange:#ff934f; --red:#ff5f6d; --purple:#bf83ff; --white:#f3fbff;
+      --shadow:0 18px 46px rgba(0,0,0,.32);
+      --telemetry:#2dd4e8; --status:#35d49a; --command:#bf83ff; --config:#ff934f; --ack:#f4c451;
+    }
+    *{box-sizing:border-box}
+    html{scroll-behavior:smooth}
+    body{margin:0;min-width:1180px;color:var(--text);font-family:Inter,"PingFang SC","Microsoft YaHei",system-ui,sans-serif;background:
+      radial-gradient(circle at 51% -10%,rgba(45,212,232,.14),transparent 31%),
+      linear-gradient(rgba(39,84,104,.075) 1px,transparent 1px),linear-gradient(90deg,rgba(39,84,104,.075) 1px,transparent 1px),var(--bg);background-size:auto,28px 28px,28px 28px,auto}
+    button{font:inherit}
+    .app{width:min(1880px,100%);margin:auto;padding:16px}
+    .topbar{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;margin:4px 2px 12px}
+    .eyebrow{font:800 10px/1.3 ui-monospace,monospace;color:var(--cyan);letter-spacing:.18em;text-transform:uppercase}
+    h1{font-size:clamp(24px,2.1vw,36px);line-height:1.1;margin:6px 0 4px;letter-spacing:-.035em}
+    .subtitle{color:#9ab3bf;font-size:12px;max-width:970px}
+    .thesis{max-width:470px;padding:10px 14px;border:1px solid rgba(45,212,232,.35);border-radius:999px;color:#bfeef3;background:rgba(45,212,232,.07);font-size:11px;text-align:center}
+    .control-deck{display:grid;grid-template-columns:auto minmax(300px,1fr) auto;gap:13px;align-items:center;padding:10px 12px;border:1px solid var(--line);background:rgba(7,18,27,.93);border-radius:13px;box-shadow:var(--shadow);margin-bottom:11px;position:sticky;top:6px;z-index:30;backdrop-filter:blur(12px)}
+    .controls{display:flex;gap:7px}.btn{border:1px solid #285068;border-radius:8px;background:#102636;color:#c9e1e9;padding:8px 11px;cursor:pointer;transition:.2s}.btn:hover{border-color:var(--cyan);color:#fff;transform:translateY(-1px)}.btn.primary{background:linear-gradient(135deg,#0f7e90,#1c62c9);border-color:#42cde3}.btn.warn:hover{border-color:var(--yellow)}
+    .progress-copy{display:flex;gap:14px;justify-content:space-between;font-size:11px;color:var(--muted)}.progress-copy strong{color:#eaf8fb;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.progress{height:5px;background:#102a3a;border-radius:8px;margin-top:7px;overflow:hidden}.progress i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--cyan),var(--green));box-shadow:0 0 12px var(--cyan)}
+    .live-badges{display:flex;gap:6px}.live-badge{font:800 10px/1.2 ui-monospace,monospace;border:1px solid #24485c;border-radius:6px;padding:6px 8px;color:#91b1bf;background:#0b1f2d}.live-badge strong{color:var(--cyan)}
+    .loop-ribbon{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:11px}.loop-chip{position:relative;padding:7px 8px;border:1px solid #173749;background:#091a27;border-radius:8px;color:#72909f;font-size:10px;text-align:center}.loop-chip:not(:last-child)::after{content:"→";position:absolute;right:-8px;color:#3b6b7c;z-index:2}.loop-chip.active{border-color:var(--cyan);color:#e8fbff;box-shadow:0 0 16px rgba(45,212,232,.12)}
+    .theater{display:grid;grid-template-columns:minmax(310px,.82fr) minmax(620px,1.55fr) minmax(390px,1fr);gap:11px;align-items:start}
+    .panel{min-width:0;border:1px solid var(--line);background:rgba(9,24,35,.96);border-radius:14px;box-shadow:var(--shadow);overflow:hidden}.panel-head{height:43px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);background:rgba(15,38,53,.65)}.panel-title{font-weight:850;font-size:12px;display:flex;gap:8px;align-items:center}.panel-index{font:900 9px/1 ui-monospace,monospace;color:var(--cyan);border:1px solid rgba(45,212,232,.35);padding:5px;border-radius:5px}.head-meta{font:700 9px/1 ui-monospace,monospace;color:#638797;letter-spacing:.08em}.section-label{font:850 9px/1.2 ui-monospace,monospace;color:#7594a4;letter-spacing:.12em;text-transform:uppercase;margin-bottom:7px}
+    .field-body,.mqtt-body{padding:10px}.field-stage{height:425px;border:1px solid #16384a;border-radius:10px;overflow:hidden;background:radial-gradient(circle at 50% 48%,rgba(45,212,232,.08),transparent 36%),#071722}.field-stage svg,.mqtt-stage svg{width:100%;height:100%;display:block}.gridline{stroke:#153343;stroke-width:.7}.local-line{stroke:#315b6e;stroke-width:3;fill:none;stroke-linecap:round;transition:.25s}.local-line.active{stroke:var(--cyan);filter:drop-shadow(0 0 5px var(--cyan))}.local-line.error{stroke:var(--red);stroke-dasharray:8 6}.node-shell{fill:#0d2736;stroke:#2c5b70;stroke-width:2;transition:.25s}.node-screen{fill:#081925;stroke:#1e4658}.node-label{fill:#e2f3f7;font-size:12px;font-weight:800}.node-sub{fill:#7193a3;font-size:8px;font-family:ui-monospace,monospace}.node-led{fill:#61747e;transition:.25s}.svg-node.online .node-led{fill:var(--green);filter:drop-shadow(0 0 5px var(--green))}.svg-node.active .node-shell{stroke:var(--cyan);filter:drop-shadow(0 0 8px rgba(45,212,232,.6))}.svg-node.offline .node-shell{stroke:var(--red);fill:#28141b}.svg-node.offline .node-led{fill:var(--red)}.svg-node.poweroff{opacity:.2;filter:grayscale(1)}.device-alarm{opacity:0;fill:var(--red);font-size:20px}.svg-node.offline .device-alarm{opacity:1}.local-driver{fill:#0b2030;stroke:#294e61}.driver-text{fill:#84a7b5;font:700 8px ui-monospace,monospace}.field-token{opacity:0;filter:drop-shadow(0 0 7px currentColor)}
+    .field-caption{display:grid;grid-template-columns:repeat(2,1fr);gap:7px;margin-top:9px}.mini-card{border:1px solid #193b4c;border-radius:8px;padding:8px;background:#091b28;min-width:0}.mini-card small{display:block;color:#698998;font-size:8px}.mini-card b{display:block;margin-top:4px;font:800 10px/1.3 ui-monospace,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.layers{display:flex;gap:5px;flex-wrap:wrap;margin-top:9px}.layer{font:750 8px ui-monospace,monospace;padding:5px 6px;border:1px solid #24495d;border-radius:5px;color:#89a9b8;background:#0d2331}.layer strong{color:var(--cyan)}
+    .mqtt-body{display:grid;gap:8px}.mqtt-stage{position:relative;height:260px;border:1px solid #183a4b;border-radius:10px;overflow:hidden;background:#071824}.lane{fill:none;stroke-width:2.4;stroke-dasharray:5 6;opacity:.57}.lane.telemetry{stroke:var(--telemetry)}.lane.status{stroke:var(--status)}.lane.command{stroke:var(--command)}.lane.config{stroke:var(--config)}.lane.ack{stroke:var(--ack)}.stage-node{fill:#0c2635;stroke:#2b5b70;stroke-width:2}.stage-node.active{stroke:var(--cyan);filter:drop-shadow(0 0 7px rgba(45,212,232,.7))}.stage-node.error{stroke:var(--red);fill:#2a131b}.stage-title{fill:#e6f6fa;font-size:13px;font-weight:850}.stage-meta{fill:#708f9e;font:8px ui-monospace,monospace}.topic-router{fill:#0e2331;stroke:#366175}.router-port{stroke-width:4}.packet{opacity:0}.packet text{font:900 7px ui-monospace,monospace;fill:#07131a}.packet rect{rx:5;filter:drop-shadow(0 0 6px currentColor)}.broker-bolt{opacity:0;fill:var(--red);font-size:20px}.broker-error .broker-bolt{opacity:1}.broker-error #broker-box{stroke:var(--red);fill:#28131a}.broker-error .lane{opacity:.15}.stage-note{position:absolute;left:10px;bottom:8px;font:700 8px ui-monospace,monospace;color:#436a7c;letter-spacing:.08em}
+    .pubsub{display:grid;grid-template-columns:1fr 1fr;gap:7px}.route-panel{border:1px solid #193d4e;background:#0a1c29;border-radius:8px;padding:8px;min-width:0}.route-title{display:flex;align-items:center;justify-content:space-between;font-size:10px;font-weight:850;margin-bottom:6px}.route-title em{font:800 8px ui-monospace,monospace;font-style:normal;padding:3px 5px;border-radius:4px}.publish em{color:var(--cyan);background:rgba(45,212,232,.1)}.subscribe em{color:var(--purple);background:rgba(191,131,255,.1)}.topic-chips{display:flex;gap:4px;flex-wrap:wrap}.topic-chip{font:700 8px ui-monospace,monospace;color:#8ba8b6;border:1px solid #244657;background:#0b202e;border-radius:4px;padding:4px 5px}.topic-chip.live{color:#fff;border-color:var(--cyan);box-shadow:0 0 8px rgba(45,212,232,.18)}
+    .message-inspector{grid-column:1/-1;display:grid;grid-template-columns:115px 1fr;gap:8px;align-items:stretch;border:1px solid #1b4052;border-radius:8px;background:#081b28;padding:8px}.message-meta{border-right:1px solid #214253;padding-right:7px}.message-meta b{display:block;font-size:10px;color:#e0f4f8}.message-meta span{display:block;margin-top:4px;color:#668795;font:7.5px/1.4 ui-monospace,monospace}.message-json{margin:0;min-height:54px;max-height:72px;overflow:auto;color:#9bc3cf;font:7.5px/1.35 ui-monospace,monospace;white-space:pre-wrap}.message-json .key{color:#64d5e3}.message-json .value{color:#e5c77b}
+    .topic-contract{border:1px solid #193d4e;border-radius:8px;background:#091c29;padding:8px}.topic-contract-grid{display:grid;grid-template-columns:1fr 1fr;gap:3px 9px}.topic-route{display:grid;grid-template-columns:9px 1fr auto;gap:5px;align-items:center;min-width:0;padding:2px 0;border-bottom:1px dashed rgba(51,84,98,.3);font:7px/1.35 ui-monospace,monospace}.topic-route i{width:7px;height:7px;border-radius:2px;background:var(--route)}.topic-route code{color:#8faab5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.topic-route b{color:var(--route);font-size:6.5px}
+    .policy-row{display:grid;grid-template-columns:1.08fr .92fr;gap:7px}.policy-card{border:1px solid #193d4e;border-radius:8px;background:#0a1d2a;padding:8px}.policy-table{width:100%;border-collapse:collapse;font:8px/1.25 ui-monospace,monospace}.policy-table th{text-align:left;color:#617f8e;font-weight:700;padding:3px;border-bottom:1px solid #254657}.policy-table td{padding:4px 3px;color:#9db5c0;border-bottom:1px dashed rgba(45,78,92,.35)}.qos{font-weight:900;color:var(--yellow)!important}.yes{color:var(--green)!important}.no{color:var(--red)!important}.retained-note{margin-top:6px;color:#7f9ba8;font-size:8px;line-height:1.45}.retained-note strong{color:var(--green)}
+    .resilience{display:grid;grid-template-columns:repeat(4,1fr);gap:7px}.res-card{height:125px;border:1px solid #1b4052;border-radius:8px;background:#0a1e2c;padding:8px;overflow:hidden}.res-title{font-size:9px;font-weight:850;color:#bdd3dc;display:flex;align-items:center;justify-content:space-between}.res-title span{font:800 7px ui-monospace,monospace;color:#668897}.will-payload,.json-card{white-space:pre-wrap;margin:6px 0 0;color:#7999a8;font:7.5px/1.35 ui-monospace,monospace}.will-payload b{color:var(--red)}.outbox{display:flex;gap:3px;align-items:flex-end;height:60px;margin-top:9px}.slot{flex:1;height:17px;border:1px dashed #315367;border-radius:3px;background:#0b2634;transition:.25s}.slot.filled{background:var(--cyan);border-color:var(--cyan);box-shadow:0 0 7px rgba(45,212,232,.35)}.slot.critical{background:var(--yellow);border-color:var(--yellow)}.slot.dropped{background:var(--red);border-color:var(--red);transform:translateY(7px);opacity:.45}.queue-policy{font:700 7px ui-monospace,monospace;color:#6f8c99}.cache-row{display:flex;align-items:center;gap:5px;margin-top:7px;padding:5px;border:1px solid #23485a;border-radius:5px;color:#879fac;font:7px ui-monospace,monospace}.cache-row strong{color:var(--green)}.cache-row.hit{border-color:var(--purple);box-shadow:0 0 10px rgba(191,131,255,.25)}.config-stack{display:grid;gap:4px;margin-top:7px}.config-box{border-left:3px solid #34596a;background:#0b2634;border-radius:3px;padding:4px 5px;font:7px/1.3 ui-monospace,monospace;color:#7999a7}.config-box.candidate{border-color:var(--orange)}.config-box.current{border-color:var(--green)}.config-box.lkg{border-color:var(--blue)}.config-box.fail{border-color:var(--red);text-decoration:line-through}.rollback-arrow{opacity:0;text-align:center;color:var(--red);font:900 8px ui-monospace,monospace}.rollback-arrow.show{opacity:1;animation:pulse .65s infinite alternate}
+    .ack-strip{display:flex;gap:4px;align-items:center;overflow:hidden;padding:7px;border:1px solid #1b4052;border-radius:8px;background:#0a1e2c}.ack-chip{flex:1;min-width:0;text-align:center;padding:5px 2px;border:1px solid #2b4a58;border-radius:5px;font:800 7px ui-monospace,monospace;color:#6f8995;background:#0a1a26;transition:.2s}.ack-chip::after{content:"›";float:right;color:#3c6474}.ack-chip:last-child::after{display:none}.ack-chip.live{color:#071510;background:var(--ack);border-color:var(--ack);box-shadow:0 0 10px rgba(244,196,81,.4)}.ack-chip.error{color:#fff;background:var(--red);border-color:var(--red)}.ack-caption{font-size:8px;color:#7896a3;white-space:nowrap;margin-right:5px}.ack-caption strong{color:var(--yellow)}
+    .status-log{display:grid;grid-template-columns:1.13fr .87fr;gap:7px}.status-card,.log-card{border:1px solid #1b4052;border-radius:8px;background:#081a27;padding:8px}.status-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 10px}.status-item{display:flex;justify-content:space-between;gap:7px;padding:3px 0;border-bottom:1px dashed rgba(58,90,104,.28);font:7.5px/1.4 ui-monospace,monospace}.status-item span{color:#638391}.status-item b{color:#d3e9ef;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:135px}.status-item b.state{color:var(--cyan)}.log-window{height:135px;overflow:auto;scrollbar-color:#245066 #0a1a26;font:7.5px/1.5 ui-monospace,monospace;color:#8ca8b5}.log-line{padding:2px 0;border-bottom:1px solid rgba(43,72,85,.25)}.log-line time{color:#4e7585}.log-line.ok{color:#83cdb2}.log-line.warn{color:#ddba68}.log-line.error{color:#ee7e88}
+    .right-body{height:1015px;display:grid;grid-template-rows:455px 1fr;min-height:0}.flow-wrap{padding:9px;overflow:auto;border-bottom:1px solid var(--line);scrollbar-color:#27546a #0a1925}.flow-list{position:relative;display:grid;gap:5px}.flow-list::before{content:"";position:absolute;left:15px;top:15px;bottom:15px;width:1px;background:#24495b}.flow-node{position:relative;display:grid;grid-template-columns:31px 1fr auto;gap:7px;align-items:center;min-height:37px;border:1px solid #193a4c;border-radius:8px;background:#0a1d2a;color:#9cb4c0;padding:5px 7px 5px 4px;cursor:pointer;text-align:left;transition:.2s;width:100%}.flow-node:hover{border-color:#3d6b7c;color:#fff;transform:translateX(-2px)}.flow-index{z-index:1;width:23px;height:23px;border-radius:50%;display:grid;place-items:center;background:#102c3b;border:1px solid #2b5567;font:850 8px ui-monospace,monospace;color:#82a2b0}.flow-node strong{display:block;font-size:9px}.flow-node small{display:block;margin-top:2px;color:#5f8291;font:7px ui-monospace,monospace}.flow-type{font:800 7px ui-monospace,monospace;border:1px solid #2b4c5b;padding:3px 4px;border-radius:4px;color:#7493a0}.flow-node.active{border-color:var(--cyan);background:linear-gradient(90deg,rgba(45,212,232,.14),#0a1d2a);box-shadow:0 0 13px rgba(45,212,232,.13);color:#fff}.flow-node.active .flow-index{background:var(--cyan);color:#031217;border-color:var(--cyan);box-shadow:0 0 10px rgba(45,212,232,.55)}.flow-node.selected{outline:1px solid var(--yellow);outline-offset:1px}.flow-node.error{border-color:var(--red);background:rgba(255,95,109,.09)}.flow-node.retry{border-color:var(--purple)}.flow-node.rollback{border-color:var(--orange)}
+    .details{padding:10px;overflow:auto;scrollbar-color:#27546a #0a1925}.detail-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:7px}.detail-heading h2{margin:0;font-size:15px;color:#edfaff}.detail-heading .detail-no{font:900 8px ui-monospace,monospace;padding:4px 6px;border:1px solid rgba(45,212,232,.35);border-radius:4px;color:var(--cyan)}.detail-block{margin:7px 0}.detail-block h3{font-size:8px;color:#6f92a1;letter-spacing:.11em;text-transform:uppercase;margin:0 0 3px}.detail-block p{font-size:9px;line-height:1.55;color:#a7bec8;margin:0}.detail-block ul{margin:2px 0 0;padding-left:15px;color:#9db5c0;font-size:8.5px;line-height:1.5}.english{border-left:3px solid var(--cyan);background:rgba(45,212,232,.07);padding:8px 9px;border-radius:0 6px 6px 0;color:#dff9fc;font-size:10px;line-height:1.45}.relation{color:#89a8b5!important}
+    .bottom-grid{display:grid;grid-template-columns:1.3fr .7fr;gap:11px;margin-top:11px}.lab-body{padding:10px}.scenario-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:7px}.scenario{position:relative;text-align:left;min-height:67px;padding:8px;border:1px solid #1c4051;border-radius:8px;background:#0a1c29;color:#9bb4bf;cursor:pointer;transition:.2s}.scenario:hover{border-color:var(--orange);transform:translateY(-2px);color:#fff}.scenario strong{display:block;font-size:9px}.scenario small{display:block;margin-top:4px;font-size:7.5px;line-height:1.4;color:#6c8b99}.scenario em{position:absolute;right:6px;top:6px;font:900 7px ui-monospace,monospace;font-style:normal;color:var(--red)}.scenario.active{border-color:var(--red);box-shadow:0 0 12px rgba(255,95,109,.18);background:rgba(255,95,109,.08)}
+    .branch-legend{display:flex;gap:7px;flex-wrap:wrap;margin-top:8px}.branch{font:800 8px ui-monospace,monospace;border:1px solid #27495a;border-radius:5px;padding:4px 6px;color:#7996a3}.branch.ok{color:var(--green)}.branch.error{color:var(--red)}.branch.retry{color:var(--purple)}.branch.timeout{color:var(--yellow)}.branch.rollback{color:var(--orange)}.branch.buffer{color:var(--cyan)}
+    .result-body{height:100%;padding:11px;background:radial-gradient(circle at 90% 0,rgba(53,212,154,.1),transparent 38%)}.result-title{font-size:15px;font-weight:900;margin-bottom:7px;color:#ecfcf6}.result-title::before{content:"✓";display:inline-grid;place-items:center;width:23px;height:23px;border-radius:50%;background:var(--green);color:#052017;margin-right:8px}.result-list{display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;padding:0;margin:0;list-style:none}.result-list li{font-size:8.5px;color:#8faab6;padding:4px 0;border-bottom:1px dashed rgba(55,89,103,.32)}.result-list li::before{content:"•";color:var(--green);margin-right:5px}.result-summary{margin-top:9px;border:1px solid rgba(53,212,154,.26);background:rgba(53,212,154,.06);border-radius:7px;padding:8px;color:#aec8c2;font-size:9px;line-height:1.5}.result-summary strong{color:#e4fff5}.result-english{margin-top:7px;color:#c7f7e4;font:800 9px/1.4 ui-monospace,monospace}.result-card{opacity:.46;filter:saturate(.55);transition:.5s}.result-card.complete{opacity:1;filter:none;border-color:rgba(53,212,154,.45);box-shadow:0 0 30px rgba(53,212,154,.1)}
+    .toast{position:fixed;left:50%;bottom:18px;transform:translate(-50%,15px);opacity:0;z-index:80;padding:9px 13px;border:1px solid #315a6e;border-radius:8px;background:#0b2230;color:#d9eef4;box-shadow:0 14px 30px rgba(0,0,0,.45);font-size:10px;pointer-events:none}.toast.show{opacity:1;transform:translate(-50%,0)}
+    @keyframes pulse{from{opacity:.45}to{opacity:1}}@keyframes dash{to{stroke-dashoffset:-22}}.reconnecting .lane{stroke:var(--purple);animation:dash .7s linear infinite}.flash{animation:pulse .38s alternate 5}.bad-quality{color:var(--red)!important}.good-quality{color:var(--green)!important}
+    @media(max-width:1450px){.app{padding:11px}.theater{grid-template-columns:300px minmax(555px,1.45fr) 370px}.right-body{height:1025px}.scenario-grid{grid-template-columns:repeat(5,1fr)}.status-item b{max-width:110px}}
+  </style>
+</head>
+<body>
+  <main class="app">
+    <header class="topbar">
+      <div>
+        <div class="eyebrow">Industrial Communication Theater · Factory F1 / Line L1</div>
+        <h1>MQTT Gateway 通信可靠性闭环</h1>
+        <div class="subtitle">GW01 把 METER01、PLC01 与 Broker / 云端解耦，并让上线、遥测、命令、配置、ACK、异常与恢复成为可追踪闭环。</div>
+      </div>
+      <div class="thesis">通信闭环 ≠ 数据处理闭环｜PUBACK ≠ 业务成功｜MQTT Online ≠ Device Online</div>
+    </header>
+
+    <section class="control-deck" aria-label="动画控制">
+      <div class="controls">
+        <button class="btn primary" id="playBtn">▶ Play</button>
+        <button class="btn" id="pauseBtn">Ⅱ Pause</button>
+        <button class="btn" id="restartBtn">↻ Restart</button>
+        <button class="btn warn" id="nextBtn">Step Next →</button>
+      </div>
+      <div>
+        <div class="progress-copy"><strong id="stepCopy">Step 01 · 加载配置</strong><span id="stepCounter">01 / 21</span></div>
+        <div class="progress"><i id="progressBar"></i></div>
+      </div>
+      <div class="live-badges">
+        <span class="live-badge">OBJECT <strong id="objectBadge">boot-01-10241</strong></span>
+        <span class="live-badge">STATE <strong id="stateBadge">BOOTING</strong></span>
+      </div>
+    </section>
+
+    <section class="loop-ribbon" aria-label="通信可靠性闭环">
+      <div class="loop-chip active">配置与上线</div><div class="loop-chip">订阅与设备连接</div><div class="loop-chip">采集与上报</div><div class="loop-chip">命令与业务 ACK</div><div class="loop-chip">配置与回滚</div><div class="loop-chip">异常与有界缓存</div><div class="loop-chip">重连恢复闭环</div>
+    </section>
+
+    <section class="theater">
+      <section class="panel">
+        <div class="panel-head"><div class="panel-title"><span class="panel-index">01</span>工业现场区</div><div class="head-meta">FACTORY F1 · LINE L1</div></div>
+        <div class="field-body">
+          <div class="field-stage">
+            <svg viewBox="0 0 360 425" role="img" aria-label="GW01 与 METER01、PLC01 的现场连接">
+              <defs><pattern id="grid" width="22" height="22" patternUnits="userSpaceOnUse"><path d="M22 0H0V22" fill="none" class="gridline"/></pattern></defs>
+              <rect width="360" height="425" fill="url(#grid)"/>
+              <text x="16" y="24" class="node-sub">SHOP FLOOR / CELL L1-A</text>
+              <path id="meterLine" class="local-line" d="M92 139 C92 210,135 220,180 260"/>
+              <path id="plcLine" class="local-line" d="M270 139 C270 210,225 220,180 260"/>
+              <g transform="translate(119 183)"><rect class="local-driver" width="122" height="37" rx="7"/><text x="61" y="15" text-anchor="middle" class="driver-text">LOCAL DRIVER</text><text x="61" y="27" text-anchor="middle" class="node-sub">Modbus TCP / Serial / TCP</text></g>
+              <g id="meterNode" class="svg-node" transform="translate(31 48)">
+                <rect class="node-shell" width="122" height="92" rx="11"/><circle class="node-led" cx="108" cy="14" r="5"/><rect class="node-screen" x="14" y="19" width="44" height="43" rx="5"/><path d="M20 50 L28 35 L35 44 L43 27 L52 45" fill="none" stroke="#2dd4e8" stroke-width="2"/><text x="67" y="33" class="node-label">METER01</text><text x="67" y="48" class="node-sub">SENSOR / INPUT</text><text x="14" y="78" class="node-sub" id="meterValue">24.6 °C · Good</text><text x="99" y="82" class="device-alarm">!</text>
+              </g>
+              <g id="plcNode" class="svg-node" transform="translate(207 48)">
+                <rect class="node-shell" width="122" height="92" rx="11"/><circle class="node-led" cx="108" cy="14" r="5"/><rect class="node-screen" x="14" y="19" width="42" height="43" rx="5"/><circle cx="26" cy="31" r="4" fill="#35d49a"/><circle cx="42" cy="31" r="4" fill="#f4c451"/><path d="M22 48H48M22 55H43" stroke="#427084"/><text x="66" y="33" class="node-label">PLC01</text><text x="66" y="48" class="node-sub">CONTROL UNIT</text><text x="14" y="78" class="node-sub" id="plcValue">RUN · Remote Ready</text><text x="99" y="82" class="device-alarm">!</text>
+              </g>
+              <g id="gatewayNode" class="svg-node" transform="translate(94 262)">
+                <rect class="node-shell" width="172" height="111" rx="13"/><circle class="node-led" cx="155" cy="16" r="6"/><rect class="node-screen" x="16" y="21" width="140" height="43" rx="6"/><text x="86" y="40" text-anchor="middle" class="node-label">GATEWAY · GW01</text><text x="86" y="54" text-anchor="middle" class="node-sub">EDGE MQTT CLIENT</text><path d="M28 82H144" stroke="#315c6e"/><circle cx="39" cy="82" r="4" fill="#2dd4e8"/><circle cx="55" cy="82" r="4" fill="#35d49a"/><circle cx="71" cy="82" r="4" fill="#bf83ff"/><text x="86" y="99" text-anchor="middle" class="node-sub">192.168.1.10 · v1.0.0</text>
+              </g>
+              <g id="telemetryFieldToken" class="field-token"><circle r="7" fill="#2dd4e8"/><text x="11" y="3" class="node-sub" fill="#2dd4e8">DATA</text></g>
+              <g id="commandFieldToken" class="field-token"><rect x="-7" y="-7" width="14" height="14" rx="3" fill="#bf83ff"/><text x="11" y="3" class="node-sub" fill="#bf83ff">CMD</text></g>
+            </svg>
+          </div>
+          <div class="field-caption">
+            <div class="mini-card"><small>Gateway Layer</small><b id="fieldGateway">Starting</b></div>
+            <div class="mini-card"><small>Physical Device Layer</small><b id="fieldDevice">Not Connected</b></div>
+            <div class="mini-card"><small>Telemetry Quality</small><b id="qualityValue">—</b></div>
+            <div class="mini-card"><small>Local Command</small><b id="commandValue">Idle</b></div>
+          </div>
+          <div class="layers"><span class="layer"><strong>L1</strong> Device</span><span class="layer"><strong>L2</strong> Driver</span><span class="layer"><strong>L3</strong> Gateway</span><span class="layer"><strong>L4</strong> MQTT</span><span class="layer"><strong>L5</strong> Cloud</span></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><div class="panel-title"><span class="panel-index">02</span>MQTT 技术处理区</div><div class="head-meta">BROKERED · DECOUPLED · RELIABLE</div></div>
+        <div class="mqtt-body">
+          <div class="mqtt-stage" id="mqttStage">
+            <svg viewBox="0 0 620 260" role="img" aria-label="Gateway、MQTT Broker、Topic Router 和云端之间的消息流">
+              <defs>
+                <marker id="arrowCyan" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10Z" fill="#2dd4e8"/></marker>
+                <marker id="arrowPurple" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10Z" fill="#bf83ff"/></marker>
+              </defs>
+              <text x="18" y="20" class="stage-meta">PUBLISHER / SUBSCRIBER</text><text x="475" y="20" class="stage-meta">CONSUMERS DECOUPLED</text>
+              <path class="lane status" d="M119 55H500"/><path class="lane telemetry" d="M119 82H500" marker-end="url(#arrowCyan)"/><path class="lane command" d="M500 112H119" marker-end="url(#arrowPurple)"/><path class="lane config" d="M500 140H119"/><path class="lane ack" d="M119 169H500"/>
+              <text x="126" y="49" class="stage-meta" fill="#35d49a">STATUS · retained</text><text x="126" y="76" class="stage-meta" fill="#2dd4e8">TELEMETRY · QoS 0/1</text><text x="386" y="106" class="stage-meta" fill="#bf83ff">CMD/DOWN · QoS 1</text><text x="384" y="134" class="stage-meta" fill="#ff934f">CONFIG/DOWN · QoS 1</text><text x="126" y="163" class="stage-meta" fill="#f4c451">ACK · business result</text>
+              <g id="mqttGateway" transform="translate(18 76)"><rect class="stage-node" width="102" height="99" rx="11"/><text x="51" y="35" text-anchor="middle" class="stage-title">GW01</text><text x="51" y="52" text-anchor="middle" class="stage-meta">MQTT CLIENT</text><text x="51" y="72" text-anchor="middle" class="stage-meta">PUB + SUB</text><circle cx="51" cy="86" r="5" fill="#617681" id="mqttGwLed"/></g>
+              <g id="brokerGroup" transform="translate(252 41)"><rect id="broker-box" class="stage-node" width="116" height="149" rx="14"/><path d="M30 43h56M30 58h56M30 73h56" stroke="#3e7083" stroke-width="4" stroke-linecap="round"/><text x="58" y="105" text-anchor="middle" class="stage-title">BROKER</text><text x="58" y="120" text-anchor="middle" class="stage-meta">SESSION · LWT</text><text x="58" y="135" text-anchor="middle" class="stage-meta">PUBACK · ROUTE</text><text x="94" y="23" class="broker-bolt">⚡</text></g>
+              <g transform="translate(405 183)"><rect class="topic-router" width="111" height="55" rx="9"/><path class="router-port" stroke="#35d49a" d="M12 15h22"/><path class="router-port" stroke="#2dd4e8" d="M12 26h22"/><path class="router-port" stroke="#bf83ff" d="M12 37h22"/><path class="router-port" stroke="#ff934f" d="M12 48h22"/><text x="71" y="25" text-anchor="middle" class="stage-title" font-size="10">TOPIC</text><text x="71" y="39" text-anchor="middle" class="stage-meta">ROUTER</text></g>
+              <g id="cloudNode" transform="translate(501 72)"><rect class="stage-node" width="101" height="104" rx="11"/><path d="M29 39c1-13 20-18 29-8 10-5 21 3 20 14 12 2 13 20-2 21H30c-17 0-17-24-1-27Z" fill="#143c50" stroke="#4b8eff"/><text x="50" y="82" text-anchor="middle" class="stage-title">CLOUD</text><text x="50" y="95" text-anchor="middle" class="stage-meta">SCADA / HMI</text></g>
+              <g id="upPacket" class="packet"><rect x="-22" y="-8" width="44" height="16" fill="#2dd4e8"/><text x="0" y="3" text-anchor="middle">TELEM</text></g>
+              <g id="statusPacket" class="packet"><rect x="-22" y="-8" width="44" height="16" fill="#35d49a"/><text x="0" y="3" text-anchor="middle">STATUS</text></g>
+              <g id="downPacket" class="packet"><rect x="-22" y="-8" width="44" height="16" fill="#bf83ff"/><text x="0" y="3" text-anchor="middle">CMD</text></g>
+              <g id="configPacket" class="packet"><rect x="-22" y="-8" width="44" height="16" fill="#ff934f"/><text x="0" y="3" text-anchor="middle">CONFIG</text></g>
+              <g id="ackPacket" class="packet"><rect x="-22" y="-8" width="44" height="16" fill="#f4c451"/><text x="0" y="3" text-anchor="middle">ACK</text></g>
+            </svg>
+            <div class="stage-note">Gateway publishes to contract Topics; it does not know how many cloud consumers exist.</div>
+          </div>
+
+          <div class="pubsub">
+            <div class="route-panel publish"><div class="route-title">Gateway PUBLISH <em>UPLINK</em></div><div class="topic-chips" id="publishTopics"><span class="topic-chip">gateway/status</span><span class="topic-chip">device/status</span><span class="topic-chip">device/telemetry</span><span class="topic-chip">cmd/ack</span><span class="topic-chip">config/ack</span><span class="topic-chip">config/current</span></div></div>
+            <div class="route-panel subscribe"><div class="route-title">Gateway SUBSCRIBE <em>DOWNLINK</em></div><div class="topic-chips" id="subscribeTopics"><span class="topic-chip">cmd/down</span><span class="topic-chip">config/down</span><span class="topic-chip">time/sync</span><span class="topic-chip">ota/down</span></div></div>
+            <div class="message-inspector"><div class="message-meta"><div class="section-label">Live Message</div><b id="messageKind">GatewayConfig</b><span id="messageDirection">LOCAL → RUNTIME</span><span id="messageFlags">schema validated</span></div><pre class="message-json" id="messageJson"></pre></div>
+          </div>
+
+          <div class="topic-contract"><div class="section-label">Topic Contract · 路由职责分离（完整路径）</div><div class="topic-contract-grid">
+            <div class="topic-route" style="--route:var(--status)"><i></i><code>factory/F1/line/L1/gateway/GW01/status</code><b>STATUS ↑</b></div>
+            <div class="topic-route" style="--route:var(--status)"><i></i><code>factory/F1/line/L1/gateway/GW01/device/METER01/status</code><b>STATUS ↑</b></div>
+            <div class="topic-route" style="--route:var(--telemetry)"><i></i><code>factory/F1/line/L1/gateway/GW01/device/METER01/telemetry</code><b>DATA ↑</b></div>
+            <div class="topic-route" style="--route:var(--status)"><i></i><code>factory/F1/line/L1/gateway/GW01/device/PLC01/status</code><b>STATUS ↑</b></div>
+            <div class="topic-route" style="--route:var(--command)"><i></i><code>factory/F1/line/L1/gateway/GW01/cmd/down</code><b>CMD ↓</b></div>
+            <div class="topic-route" style="--route:var(--ack)"><i></i><code>factory/F1/line/L1/gateway/GW01/cmd/ack</code><b>ACK ↑</b></div>
+            <div class="topic-route" style="--route:var(--config)"><i></i><code>factory/F1/line/L1/gateway/GW01/config/down</code><b>CONFIG ↓</b></div>
+            <div class="topic-route" style="--route:var(--ack)"><i></i><code>factory/F1/line/L1/gateway/GW01/config/ack</code><b>ACK ↑</b></div>
+            <div class="topic-route" style="--route:var(--status)"><i></i><code>factory/F1/line/L1/gateway/GW01/config/current</code><b>RETAIN ↑</b></div>
+          </div></div>
+
+          <div class="policy-row">
+            <div class="policy-card"><div class="section-label">QoS Strategy · 不是越高越好</div><table class="policy-table"><thead><tr><th>Message</th><th>QoS</th><th>Business Rule</th></tr></thead><tbody><tr><td>telemetry</td><td class="qos">0 / 1</td><td>可控丢帧 / 可降级</td></tr><tr><td>device/status</td><td class="qos">1</td><td>retained current state</td></tr><tr><td>cmd/down · cmd/ack</td><td class="qos">1</td><td>messageId + 幂等</td></tr><tr><td>config/down · ack</td><td class="qos">1</td><td>version + checksum</td></tr><tr><td>ota/down</td><td class="qos">1</td><td>业务层确认</td></tr></tbody></table></div>
+            <div class="policy-card"><div class="section-label">Retained Message</div><table class="policy-table"><tbody><tr><td>gateway/status</td><td class="yes">YES</td></tr><tr><td>device/status</td><td class="yes">YES</td></tr><tr><td>config/current</td><td class="yes">YES</td></tr><tr><td>high-rate telemetry</td><td class="no">NO</td></tr><tr><td>cmd/down / old ACK</td><td class="no">NO</td></tr></tbody></table><div class="retained-note"><strong>New panel → current status immediately.</strong><br>旧命令若 retained，可能在新订阅时被误执行。</div></div>
+          </div>
+
+          <div class="resilience">
+            <div class="res-card" id="willCard"><div class="res-title">LAST WILL <span>retain · true</span></div><div class="will-payload">Topic: …/GW01/status
+{
+ status: <b>"offline"</b>,
+ reason: "unexpected_disconnect"
+}</div></div>
+            <div class="res-card" id="outboxCard"><div class="res-title">BOUNDED OUTBOX <span id="outboxLabel">0 / 6</span></div><div class="outbox" id="outbox"><i class="slot"></i><i class="slot"></i><i class="slot"></i><i class="slot"></i><i class="slot"></i><i class="slot"></i></div><div class="queue-policy">TTL · drop-oldest · priority ACK/status</div></div>
+            <div class="res-card" id="cacheCard"><div class="res-title">IDEMPOTENCY CACHE <span>recent result</span></div><div class="cache-row" id="cacheRow"><span>cmd-…-0001</span><strong id="cacheResult">MISS</strong></div><div class="json-card">QoS 1 duplicate → do not write PLC twice.</div></div>
+            <div class="res-card" id="configCard"><div class="res-title">CONFIG STORE <span>atomic apply</span></div><div class="config-stack"><div class="config-box candidate" id="candidateBox">Candidate: —</div><div class="config-box current" id="currentBox">Current: v12</div><div class="rollback-arrow" id="rollbackArrow">↶ ROLLBACK</div><div class="config-box lkg" id="lkgBox">Last-known-good: v12</div></div></div>
+          </div>
+
+          <div class="ack-strip"><span class="ack-caption">业务 ACK <strong>≠ PUBACK</strong></span><span class="ack-chip" data-ack="RECEIVED">RECEIVED</span><span class="ack-chip" data-ack="REJECTED">REJECTED</span><span class="ack-chip" data-ack="EXECUTING">EXECUTING</span><span class="ack-chip" data-ack="SUCCEEDED">SUCCEEDED</span><span class="ack-chip" data-ack="FAILED">FAILED</span><span class="ack-chip" data-ack="TIMED_OUT">TIMED_OUT</span><span class="ack-chip" data-ack="DUPLICATED">DUPLICATED</span></div>
+
+          <div class="status-log">
+            <div class="status-card"><div class="section-label">Live Runtime State</div><div class="status-grid" id="statusGrid">
+              <div class="status-item"><span>Current Step</span><b data-status="step">Load Config</b></div><div class="status-item"><span>Current Message ID</span><b data-status="messageId">boot-01-10241</b></div>
+              <div class="status-item"><span>Current Device</span><b data-status="device">GW01</b></div><div class="status-item"><span>Current Topic</span><b data-status="topic">—</b></div>
+              <div class="status-item"><span>Current QoS</span><b data-status="qos">—</b></div><div class="status-item"><span>Current State</span><b class="state" data-status="state">Loading</b></div>
+              <div class="status-item"><span>Gateway Status</span><b data-status="gateway">Starting</b></div><div class="status-item"><span>Device Status</span><b data-status="deviceStatus">Not Connected</b></div>
+              <div class="status-item"><span>Outbox Count</span><b data-status="outbox">0</b></div><div class="status-item"><span>Config Version</span><b data-status="config">v12</b></div>
+              <div class="status-item"><span>Last ACK</span><b data-status="ack">—</b></div><div class="status-item"><span>Session / KeepAlive</span><b data-status="session">Clean / 30s</b></div>
+              <div class="status-item"><span>Heartbeat</span><b data-status="heartbeat">Waiting</b></div><div class="status-item"><span>Outbox Policy</span><b data-status="outboxPolicy">6 · TTL · priority</b></div>
+            </div></div>
+            <div class="log-card"><div class="section-label">Gateway Event Log</div><div class="log-window" id="logWindow" aria-live="polite"></div></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><div class="panel-title"><span class="panel-index">03</span>业务流程与技术细节</div><div class="head-meta">CLICK ANY NODE</div></div>
+        <div class="right-body">
+          <div class="flow-wrap"><div class="flow-list" id="flowList"></div></div>
+          <article class="details" id="detailPanel">
+            <div class="detail-heading"><h2 id="detailTitle">加载配置</h2><span class="detail-no" id="detailNo">STEP 01</span></div>
+            <div class="detail-block"><h3>业务作用</h3><p id="detailPurpose"></p></div>
+            <div class="detail-block"><h3>输入</h3><p id="detailInput"></p></div>
+            <div class="detail-block"><h3>输出</h3><p id="detailOutput"></p></div>
+            <div class="detail-block"><h3>关键技术</h3><ul id="detailTech"></ul></div>
+            <div class="detail-block"><h3>常见异常 / 判断条件</h3><ul id="detailAbnormal"></ul></div>
+            <div class="detail-block"><h3>前后关系</h3><p class="relation" id="detailRelation"></p></div>
+            <div class="detail-block"><h3>Simple Technical English</h3><div class="english" id="detailEnglish"></div></div>
+          </article>
+        </div>
+      </section>
+    </section>
+
+    <section class="bottom-grid">
+      <section class="panel">
+        <div class="panel-head"><div class="panel-title"><span class="panel-index">04</span>异常分支实验台</div><div class="head-meta">10 REQUIRED FAILURE MODES · CLICK TO INJECT</div></div>
+        <div class="lab-body">
+          <div class="scenario-grid" id="scenarioGrid"></div>
+          <div class="branch-legend"><span class="branch ok">OK</span><span class="branch error">ERROR / ALARM</span><span class="branch retry">RETRY 1s→2s→4s→8s</span><span class="branch timeout">TIMEOUT</span><span class="branch rollback">ROLLBACK</span><span class="branch buffer">BUFFERED / DROPPED</span></div>
+        </div>
+      </section>
+      <section class="panel result-card" id="resultCard">
+        <div class="result-body"><div class="result-title">MQTT Gateway Communication Loop Closed</div><ul class="result-list"><li>MQTT connected + LWT ready</li><li>Downlink Topics subscribed</li><li>Gateway / Device status separated</li><li>Telemetry sent / buffered / dropped</li><li>Command validation + idempotency</li><li>Execution result + business ACK</li><li>Config version + checksum + rollback</li><li>Broker reconnect completed</li><li>Bounded Outbox controlled</li><li>Critical state restored</li></ul><div class="result-summary"><strong>这个动画展示的是 MQTT Gateway 的通信可靠性闭环：</strong><br>上报、下发、执行、ACK、异常检测、重连恢复共同构成一个可解释的工业通信系统。</div><div class="result-english">The MQTT Gateway makes field devices observable, controllable, configurable, and recoverable through a reliable communication loop.</div></div>
+      </section>
+    </section>
+  </main>
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const BASE = "factory/F1/line/L1/gateway/GW01";
+    const CMD_ID = "cmd-20260703-0001";
+    const BOOT_ID = "boot-01-10241";
+    const STEP_SECONDS = 4.2;
+
+    // 21 个流程节点：动画、详情面板、状态字段均由此数组驱动。
+    const steps = [
+      {id:"load-config",title:"加载配置",shortLabel:"Load Config",type:"boot",purpose:"从本地持久化区加载 Gateway 身份、Broker、设备清单、Topic 模板、QoS、重连与 Outbox 策略，建立本次启动的确定性起点。",input:"GatewayConfig：GW01、mqtt://broker.local、clientId GW01-F1-L1、KeepAlive 30s、METER01 / PLC01、currentConfigVersion v12。",output:"通过校验的运行时配置与 bootId = boot-01-10241。",tech:["配置 Schema 与默认值","密钥与普通配置分离","Topic 模板 / QoS 策略","有界 Outbox 与重连参数"],abnormal:["配置缺失或 JSON 损坏","设备 ID 重复","Broker URL / TLS 参数无效"],relation:"它是启动入口；成功后才能构造 MQTT CONNECT 与本地驱动。",english:"The gateway loads a validated local configuration before starting communication.",status:{messageId:BOOT_ID,device:"GW01",topic:"—",qos:"—",state:"Loading",gateway:"Starting",deviceStatus:"Not Connected",outbox:"0",config:"v12",ack:"—",session:"Clean / 30s"},log:"Load config v12 from local storage",logType:"ok",visual:"config"},
+      {id:"mqtt-connect",title:"建立 MQTT 连接",shortLabel:"MQTT Connect",type:"session",purpose:"GW01 使用唯一 ClientId 建立到 Broker 的受控会话，并由 KeepAlive 检测半开连接。",input:"brokerUrl、clientId、认证 / TLS、KeepAlive=30s、Clean Start / Session Expiry。",output:"CONNACK 成功的 MQTT 会话；失败则进入指数退避。",tech:["CONNECT / CONNACK","ClientId 唯一性","KeepAlive PINGREQ / PINGRESP","TLS 与认证"],abnormal:["网络不可达","Broker 地址或认证错误","TLS 证书 / 时间错误","ClientId 冲突"],relation:"连接成功不等于业务恢复；后面还必须注册状态、恢复订阅和本地设备。",english:"A successful MQTT connection is only the start of the recovery sequence.",status:{messageId:BOOT_ID,device:"GW01",topic:"mqtt://broker.local",qos:"—",state:"Connecting",gateway:"Connecting",deviceStatus:"Not Connected",outbox:"0",config:"v12",ack:"—",session:"Clean Start / 30s"},log:"CONNECT broker with clientId GW01-F1-L1, keepAlive 30s",visual:"connect"},
+      {id:"register-lwt",title:"注册 Last Will",shortLabel:"Register LWT",type:"status",purpose:"在 CONNECT 阶段把异常离线消息托管给 Broker，使断电、崩溃或网络突断仍能被远端感知。",input:`Will Topic: ${BASE}/status；payload status=offline, reason=unexpected_disconnect；retain=true。`,output:"Broker 保存但暂不发布的 LWT。",tech:["Last Will and Testament","Retained state","异常断开检测","服务端代理发布"],abnormal:["Will Topic 越权","payload 缺少 gatewayId / timestamp","错误地把正常 disconnect 当异常"],relation:"它必须随 MQTT 会话注册；随后 GW01 主动发布 retained online 覆盖旧 offline。",english:"The broker publishes the Last Will if the gateway disappears unexpectedly.",status:{messageId:BOOT_ID,device:"GW01",topic:`${BASE}/status`,qos:"QoS 1",state:"Registering LWT",gateway:"Connected",deviceStatus:"Not Connected",outbox:"0",config:"v12",ack:"—",session:"Active / 30s"},log:"Register LWT: gateway/GW01/status offline, retain=true",visual:"lwt"},
+      {id:"publish-online",title:"发布 Gateway Online",shortLabel:"Publish Online",type:"status",purpose:"发布 GW01 当前在线状态，让新订阅的 SCADA 面板立即获得最新状态。",input:"gatewayId、status=online、version=1.0.0、ip=192.168.1.10、timestamp。",output:"retained gateway/status online；云端状态面板更新。",tech:["PUBLISH QoS 1","Retain=true","状态快照","Broker 路由解耦"],abnormal:["PUBLISH 未确认","旧 retained offline 未覆盖","时钟未同步导致 timestamp 异常"],relation:"在会话与 LWT 就绪后发布；与高频 telemetry 的非 retained 策略严格区分。",english:"The gateway publishes a retained online state for immediate visibility.",status:{messageId:BOOT_ID,device:"GW01",topic:`${BASE}/status`,qos:"QoS 1 · Retained",state:"Online Published",gateway:"Online",deviceStatus:"Not Connected",outbox:"0",config:"v12",ack:"—",session:"Active / 30s"},log:"Publish retained online status for GW01",logType:"ok",visual:"online"},
+      {id:"subscribe-downlink",title:"订阅下行 Topic",shortLabel:"Subscribe Topics",type:"subscribe",purpose:"恢复 GW01 负责处理的命令、配置、时间同步和 OTA 下行路由。",input:"cmd/down、config/down、time/sync、ota/down。",output:"SUBACK 后的有效订阅集合。",tech:["SUBSCRIBE / SUBACK","Topic 权限 ACL","QoS 1 下行","Session 恢复"],abnormal:["部分 Topic SUBACK 失败","ACL 拒绝","订阅通配符过宽","重连后漏订阅"],relation:"它位于会话建立后；未完成订阅恢复时不能宣称下行通道健康。",english:"The gateway restores only the downlink topics it is responsible for.",status:{messageId:BOOT_ID,device:"GW01",topic:`${BASE}/{cmd,config}/down`,qos:"QoS 1",state:"Subscribing",gateway:"Online",deviceStatus:"Not Connected",outbox:"0",config:"v12",ack:"—",session:"4 Topics Active"},log:"Subscribe cmd/down, config/down, time/sync, ota/down",logType:"ok",visual:"subscribe"},
+      {id:"connect-devices",title:"建立设备连接",shortLabel:"Connect Devices",type:"device",purpose:"通过 Modbus TCP / Serial / TCP Driver 建立现场连接，并独立发布每台设备状态。",input:"METER01、PLC01 地址、站号、超时、轮询与重试参数。",output:"设备在线状态和 retained device/status。",tech:["Modbus / 串口驱动","连接与轮询状态机","设备状态独立建模","故障隔离"],abnormal:["连接超时","串口占用","Modbus Exception","PLC 运行模式不允许远控"],relation:"Gateway Online 只代表 MQTT 客户端在线；本节点建立物理设备层可用性。",english:"Gateway online and device online are two different operational states.",status:{messageId:BOOT_ID,device:"METER01 + PLC01",topic:`${BASE}/device/+/status`,qos:"QoS 1 · Retained",state:"Device Connecting",gateway:"Online",deviceStatus:"Both Online",outbox:"0",config:"v12",ack:"—",session:"Active / 30s"},log:"METER01 and PLC01 connected; publish device/status online",logType:"ok",visual:"devices"},
+      {id:"collect-data",title:"采集设备数据",shortLabel:"Collect Data",type:"telemetry",purpose:"周期读取现场点位，并把数值与质量、启动标识和序号绑定，避免只传一个裸值。",input:"METER01 registers、PLC01 status words、driver quality、采集时间。",output:"gatewayId、deviceId、timestamp、bootId、sequenceId、quality、payload。",tech:["周期轮询","quality=Good/Bad/Uncertain","bootId + sequenceId","采样与发布时间分离"],abnormal:["读取超时","点位映射错误","数据越界","设备重启造成序号回绕"],relation:"在设备连接成功后采集；输出是 telemetry 封装与发布的输入。",english:"Telemetry carries quality and a boot-aware sequence, not just a value.",status:{messageId:"boot-01-10241 / seq-000287",device:"METER01",topic:"local://METER01/registers",qos:"Local Driver",state:"Sampling",gateway:"Online",deviceStatus:"METER01 Online",outbox:"0",config:"v12",ack:"—",session:"Active / 30s"},log:"Read METER01 value=24.6°C, quality=Good, sequenceId=287",logType:"ok",visual:"collect"},
+      {id:"publish-telemetry",title:"发布 Telemetry",shortLabel:"Publish Telemetry",type:"telemetry",purpose:"按设备 Topic 发布遥测；Broker 负责把消息路由给任意数量的云端消费者。",input:"带 quality、bootId、sequenceId 的 telemetry JSON。",output:`PUBLISH ${BASE}/device/METER01/telemetry。`,tech:["QoS 0 / QoS 1 分级","非 Retained 高频流","背压与可控降级","Topic 路由解耦"],abnormal:["Broker 暂时不可用","QoS 1 未获 PUBACK","消息过期","高频积压"],relation:"它承接采集结果；失败时进入有界 Outbox，而不是无限重试占满内存。",english:"High-rate telemetry favors continuity and controlled degradation over perfect delivery.",status:{messageId:"boot-01-10241 / seq-000287",device:"METER01",topic:`${BASE}/device/METER01/telemetry`,qos:"QoS 1 · Not Retained",state:"Publishing",gateway:"Online",deviceStatus:"METER01 Online",outbox:"0",config:"v12",ack:"PUBACK only",session:"Active / 30s"},log:"METER01 telemetry published, QoS 1, quality=Good",logType:"ok",visual:"telemetry"},
+      {id:"receive-command",title:"接收 Command",shortLabel:"Receive Command",type:"command",purpose:"云端只向 Broker 的 cmd/down 发布；GW01 通过订阅得到带 messageId 的下行命令。",input:"messageId=cmd-20260703-0001、targetDeviceId=PLC01、command=StartMeasure、parameters、timestamp。",output:"记录 RECEIVED 业务 ACK 并进入安全校验。",tech:["QoS 1 至少一次投递","messageId 跟踪","Broker 解耦","接收与执行分离"],abnormal:["JSON 不完整","messageId 缺失","消息过期","Topic 与 payload 身份不一致"],relation:"它是命令闭环入口；收到 MQTT 消息不能直接显示执行成功。",english:"Receiving a command is not the same as executing it successfully.",status:{messageId:CMD_ID,device:"PLC01",topic:`${BASE}/cmd/down`,qos:"QoS 1",state:"Received",gateway:"Online",deviceStatus:"PLC01 Online",outbox:"0",config:"v12",ack:"RECEIVED",session:"Active / 30s"},log:`Command ${CMD_ID} received from cmd/down`,visual:"command-in"},
+      {id:"validate-command",title:"校验 Command",shortLabel:"Validate Command",type:"command",purpose:"判断云端命令是否能进入现场执行阶段，GW01 在这里承担现场安全边界。",input:"cmd/down：messageId、gatewayId、targetDeviceId、command、parameters、timestamp。",output:"通过则进入幂等判断；失败则不写 PLC，并发布 REJECTED ACK。",tech:["Topic 身份校验","JSON Schema","命令白名单","参数范围 / 消息时效","设备存在性与在线检查"],abnormal:["设备 ID 不存在","命令不在白名单","参数越界","消息过期","Topic 与 payload 不一致"],relation:"它位于接收 Command 之后、幂等与设备执行之前，阻止错误命令直达现场。",english:"This step checks whether the remote command is safe and valid before sending it to the local device.",status:{messageId:CMD_ID,device:"PLC01",topic:`${BASE}/cmd/down`,qos:"QoS 1",state:"Validating",gateway:"Online",deviceStatus:"PLC01 Online",outbox:"0",config:"v12",ack:"RECEIVED",session:"Active / 30s"},log:"Command validation passed: topic, identity, whitelist, range, TTL",logType:"ok",visual:"validate"},
+      {id:"idempotency",title:"幂等判断",shortLabel:"Idempotency Check",type:"command",purpose:"用 messageId 查询最近命令结果，保证 QoS 1 重复投递不会重复写 PLC。",input:`messageId=${CMD_ID} 与最近结果缓存。`,output:"MISS 进入执行；HIT 直接返回之前终态或 DUPLICATED ACK。",tech:["messageId 唯一键","结果缓存 TTL / 容量","原子 check-and-set","至少一次到业务恰好一次效果"],abnormal:["缓存过早淘汰","并发重复命令竞态","messageId 被不同命令复用"],relation:"校验通过后先去重，再接触设备；执行终态会回写此缓存。",english:"Business idempotency prevents a QoS 1 duplicate from writing the PLC twice.",status:{messageId:CMD_ID,device:"PLC01",topic:"local://idempotency-cache",qos:"Business Layer",state:"Cache MISS",gateway:"Online",deviceStatus:"PLC01 Online",outbox:"0",config:"v12",ack:"RECEIVED",session:"Active / 30s"},log:`Idempotency cache MISS for ${CMD_ID}; reserve execution`,visual:"idempotency"},
+      {id:"execute-command",title:"执行设备命令",shortLabel:"Execute Device Cmd",type:"device",purpose:"GW01 把已验证且首次出现的命令转换为本地协议写入，并等待 PLC01 的真实执行结果。",input:"StartMeasure 与合法参数、本地地址映射、timeoutMs=3000。",output:"PLC01 success / device error / timeout。",tech:["协议适配与寄存器映射","设备在线前置检查","执行超时","写后读校验"],abnormal:["PLC01 offline","Modbus Exception","响应超时","写入成功但状态未改变"],relation:"PUBACK 只说明 Broker 收到消息；只有本节点结果才能决定最终业务 ACK。",english:"The gateway waits for the real PLC result before reporting command success.",status:{messageId:CMD_ID,device:"PLC01",topic:"local://PLC01/StartMeasure",qos:"Modbus TCP",state:"Executing",gateway:"Online",deviceStatus:"PLC01 Busy",outbox:"0",config:"v12",ack:"EXECUTING",session:"timeoutMs 3000"},log:"Forward StartMeasure to PLC01; wait up to 3000 ms",visual:"execute"},
+      {id:"publish-command-ack",title:"发布 Command ACK",shortLabel:"Publish Cmd ACK",type:"ack",purpose:"按状态机发布 RECEIVED、EXECUTING 和终态 ACK，让云端得到可解释的业务结果。",input:"命令校验结果、设备执行结果、reason、timestamps。",output:`${BASE}/cmd/ack：SUCCEEDED / FAILED / TIMED_OUT / REJECTED / DUPLICATED。`,tech:["业务 ACK 状态机","QoS 1","messageId 关联","终态持久化与幂等返回"],abnormal:["ACK 发布失败进入高优先级 Outbox","状态逆序","同一 messageId 出现多个冲突终态"],relation:"它闭合命令链路；Broker PUBACK 不能替代这层业务 ACK。",english:"A business ACK proves validation and execution, while PUBACK only proves broker receipt.",status:{messageId:CMD_ID,device:"PLC01",topic:`${BASE}/cmd/ack`,qos:"QoS 1 · Not Retained",state:"Command Closed",gateway:"Online",deviceStatus:"PLC01 Online",outbox:"0",config:"v12",ack:"SUCCEEDED",session:"Active / 30s"},log:`PLC01 succeeded; publish cmd/ack SUCCEEDED for ${CMD_ID}`,logType:"ok",visual:"cmd-ack"},
+      {id:"receive-config",title:"接收 Config",shortLabel:"Receive Config",type:"config",purpose:"接收云端 v13 候选配置，但不把“收到”误当作“生效”。",input:"config/down：gatewayId=GW01、version=v13、checksum、deviceConfig、timestamp。",output:"隔离的 Candidate Config v13。",tech:["候选区隔离","配置消息 QoS 1","版本化配置","messageId / correlationId"],abnormal:["配置过大","格式不完整","目标 Gateway 不匹配","重复投递"],relation:"接收后必须先校验版本、checksum 与设备配置，再决定应用。",english:"A downloaded configuration becomes a candidate, not the active configuration.",status:{messageId:"cfg-20260703-v13",device:"GW01",topic:`${BASE}/config/down`,qos:"QoS 1",state:"Config Received",gateway:"Online",deviceStatus:"Both Online",outbox:"0",config:"v12 → v13?",ack:"RECEIVED",session:"Active / 30s"},log:"Receive config/down candidate v13",visual:"config-in"},
+      {id:"validate-config",title:"校验 Config",shortLabel:"Validate Config",type:"config",purpose:"验证候选配置是否比当前版本更新、内容完整且 checksum 一致。",input:"Candidate v13、Current v12、checksum、Schema、设备地址与点位。",output:"VALIDATED 或 rejected_old_version / checksum_mismatch。",tech:["单调版本检查","SHA checksum","Schema 校验","设备配置交叉校验"],abnormal:["version < current","checksum 不匹配","设备地址冲突","必填点位缺失"],relation:"只有全部校验通过，候选配置才能进入原子应用阶段。",english:"Version and checksum checks protect the gateway from stale or corrupted configuration.",status:{messageId:"cfg-20260703-v13",device:"GW01",topic:"local://config/validate",qos:"Business Layer",state:"Config Validating",gateway:"Online",deviceStatus:"Both Online",outbox:"0",config:"v12 + candidate v13",ack:"VALIDATING",session:"Active / 30s"},log:"Config v13 schema, gatewayId, version and checksum passed",logType:"ok",visual:"config-validate"},
+      {id:"apply-config",title:"应用配置 / 回滚",shortLabel:"Apply / Rollback",type:"config",purpose:"原子应用 v13 并验证设备连接；若后续候选失败，则回滚到 last-known-good，确保 Gateway 可启动。",input:"已校验 Candidate、Current、Last-known-good 与健康检查。",output:"成功：Current v13 + retained config/current；失败：rollback + config/ack failed。",tech:["两阶段应用","Last-known-good","原子切换","健康检查与回滚"],abnormal:["应用后设备连接失败","运行时资源不足","checksum 晚期发现错误","回滚文件损坏"],relation:"它把“收到哪一版”转化成“哪一版真正生效”，随后发布配置 ACK。",english:"The gateway keeps the last-known-good configuration and rolls back on apply failure.",status:{messageId:"cfg-20260703-v13",device:"GW01",topic:`${BASE}/config/ack`,qos:"QoS 1",state:"Applied · Rollback Ready",gateway:"Online",deviceStatus:"Both Online",outbox:"0",config:"v13 Applied",ack:"APPLIED",session:"Active / 30s"},log:"Apply config v13; publish config/current retained and config/ack applied",logType:"ok",visual:"config-apply"},
+      {id:"broker-disconnect",title:"Broker 断线重连",shortLabel:"Reconnect Broker",type:"retry",purpose:"检测 MQTT 链路中断，停止盲目发布并使用带抖动的指数退避重连。",input:"KeepAlive 超时 / socket error / publish failure。",output:"BrokerDisconnected → Reconnecting；retry 1s / 2s / 4s / 8s。",tech:["KeepAlive 断线检测","指数退避 + jitter","连接状态机","失败原因分类"],abnormal:["网络不可达","认证过期","Broker 地址错误","TLS 失败"],relation:"断线期间新 telemetry 进入有界 Outbox 或被策略丢弃；重连成功还要恢复订阅与状态。",english:"The gateway reconnects with exponential backoff instead of retrying in a tight loop.",status:{messageId:"reconnect-01",device:"GW01",topic:"mqtt://broker.local",qos:"—",state:"Reconnecting · 1s→8s",gateway:"BrokerDisconnected",deviceStatus:"Both Online",outbox:"1",config:"v13",ack:"Last: APPLIED",session:"Disconnected"},log:"Broker disconnected; retry in 1s / 2s / 4s / 8s with jitter",logType:"error",visual:"disconnect"},
+      {id:"outbox-control",title:"离线缓存与丢弃",shortLabel:"Outbox Control",type:"buffer",purpose:"在 Broker 不可用时用容量与 TTL 受控缓存，优先保留 status / ACK，主动丢弃低优先级或过期 telemetry。",input:"断线期间的 telemetry、status、ACK 与其 priority / expiresAt。",output:"Buffered / Dropped 计数；drop-oldest 或 drop-low-priority。",tech:["有界队列","TTL","优先级","drop-oldest / drop-low-priority"],abnormal:["Outbox 满","磁盘写失败","消息已过期","ACK 被错误降级"],relation:"它承接断线发布失败；恢复后只补发仍有业务价值的消息。",english:"A bounded outbox prevents a network problem from becoming a memory failure.",status:{messageId:"telemetry-seq-288…294",device:"METER01",topic:`${BASE}/device/METER01/telemetry`,qos:"QoS 0/1",state:"Buffered / Dropped",gateway:"Reconnecting",deviceStatus:"METER01 Online",outbox:"6 / 6 · 2 dropped",config:"v13",ack:"Critical ACK kept",session:"Disconnected"},log:"Outbox full: keep status/ACK, drop 2 expired low-priority telemetry",logType:"warn",visual:"outbox"},
+      {id:"network-recovery",title:"网络恢复",shortLabel:"Recover Session",type:"retry",purpose:"重新连接后恢复订阅、发布 retained online、补发关键状态与未过期缓存，验证整个发布通道。",input:"网络恢复事件、Outbox、订阅集合、当前设备状态。",output:"Connected + Subscribed + Online Republished + Outbox Flushed。",tech:["重连序列","重新订阅","关键状态重放","Outbox TTL 过滤"],abnormal:["仅 IsConnected 但订阅失败","online 发布失败","旧 telemetry 被错误补发","会话状态不一致"],relation:"它不是只看 socket；必须证明连接、订阅、状态与发布四个环节恢复。",english:"Recovery includes connection, subscriptions, online state, and valid outbox delivery.",status:{messageId:"reconnect-01",device:"GW01",topic:`${BASE}/status`,qos:"QoS 1 · Retained",state:"Recovered",gateway:"Online",deviceStatus:"Both Online",outbox:"0 · 4 flushed",config:"v13",ack:"Recovery Completed",session:"Restored / 30s"},log:"Reconnected, resubscribed, publish online, flush 4 valid Outbox messages",logType:"ok",visual:"recovery"},
+      {id:"device-fault",title:"设备异常上报",shortLabel:"Report Device Fault",type:"alarm",purpose:"PLC01 本地通信超时而 GW01 仍在线；独立发布 device/status offline，并阻止后续命令写入。",input:"本地 Driver timeout、连续失败阈值、最后成功时间。",output:"retained PLC01/status offline；telemetry quality=Bad；命令 FAILED reason=device_offline。",tech:["Gateway / Device 分层状态","故障去抖","Quality 标识","命令前置状态检查"],abnormal:["短抖动误判离线","设备恢复未上报","MQTT 在线被误当成设备在线"],relation:"它证明 MQTT 会话健康不代表物理设备健康；设备恢复后应再次发布 online。",english:"MQTT online does not mean the physical device is online or executable.",status:{messageId:"dev-fault-PLC01",device:"PLC01",topic:`${BASE}/device/PLC01/status`,qos:"QoS 1 · Retained",state:"Device Fault Reported",gateway:"Online",deviceStatus:"PLC01 Offline",outbox:"0",config:"v13",ack:"FAILED · device_offline",session:"Active / 30s"},log:"PLC01 communication timeout; publish device/status offline; reject new command",logType:"error",visual:"device-fault"},
+      {id:"loop-closed",title:"闭环完成",shortLabel:"Loop Closed",type:"ok",purpose:"汇总上线、可观测、可控、可配置、异常感知与恢复证据，证明通信可靠性闭环完成。",input:"连接 / 订阅状态、设备状态、Telemetry、Command ACK、Config ACK、重连与 Outbox 指标。",output:"可解释、可追踪、可恢复的 MQTT Gateway 运行状态。",tech:["端到端可观测性","业务 ACK","分层状态模型","恢复完成条件"],abnormal:["只看 PUBACK","只看 IsConnected","忽略设备状态","无限缓存"],relation:"这是本轮演示终点；后续周期继续采集、心跳、命令与异常监控，闭环持续运行。",english:"The gateway keeps field devices observable, controllable, configurable, and recoverable.",status:{messageId:BOOT_ID,device:"GW01 + Field Devices",topic:"All Contract Topics",qos:"Policy Applied",state:"Business Loop Closed",gateway:"Online",deviceStatus:"Tracked",outbox:"Controlled",config:"v13 Applied",ack:"Command + Config Closed",session:"Healthy / 30s"},log:"Communication reliability loop closed and continuously observable",logType:"ok",visual:"complete"}
+    ];
+
+    const scenarios = [
+      {id:"broker-fail",title:"Broker 连接失败",hint:"连线断开 · Reconnecting · 1/2/4/8s",tag:"RETRY",step:1},
+      {id:"last-will",title:"异常掉线触发 LWT",hint:"Broker 自动 retained offline",tag:"LWT",step:2},
+      {id:"device-fail",title:"设备通信失败",hint:"Gateway online / Device offline",tag:"ALARM",step:19},
+      {id:"publish-fail",title:"Telemetry 发布失败",hint:"进入 Outbox，满后丢低优先级",tag:"BUFFER",step:17},
+      {id:"invalid-command",title:"命令参数非法",hint:"校验失败，不写 PLC，REJECTED",tag:"ERROR",step:9},
+      {id:"device-offline",title:"离线设备收到命令",hint:"前置检查失败，FAILED",tag:"FAILED",step:11},
+      {id:"command-timeout",title:"命令执行超时",hint:"Executing → TIMED_OUT",tag:"TIMEOUT",step:11},
+      {id:"duplicate-command",title:"QoS 1 重复命令",hint:"cache HIT，不重复写 PLC",tag:"IDEMPOTENT",step:10},
+      {id:"old-config",title:"配置版本过旧",hint:"version check 拒绝覆盖",tag:"REJECT",step:14},
+      {id:"checksum-fail",title:"Checksum / Apply 失败",hint:"Candidate → last-known-good",tag:"ROLLBACK",step:15}
+    ];
+
+    const $ = (s, root=document) => root.querySelector(s);
+    const $$ = (s, root=document) => [...root.querySelectorAll(s)];
+    let currentStep = 0, master, playing = false, toastTimer;
+
+    // 初始化流程列表和异常实验按钮。
+    function buildUI(){
+      $("#flowList").innerHTML = steps.map((s,i)=>`<button class="flow-node" data-step="${i}" aria-label="查看 ${s.title} 技术细节"><span class="flow-index">${String(i+1).padStart(2,"0")}</span><span><strong>${s.title}</strong><small>${s.shortLabel}</small></span><span class="flow-type">${s.type.toUpperCase()}</span></button>`).join("");
+      $("#scenarioGrid").innerHTML = scenarios.map(s=>`<button class="scenario" data-scenario="${s.id}"><strong>${s.title}</strong><small>${s.hint}</small><em>${s.tag}</em></button>`).join("");
+      $$(".flow-node").forEach(btn=>btn.addEventListener("click",()=>{selectDetails(+btn.dataset.step,true); master?.pause(); playing=false;}));
+      $$(".scenario").forEach(btn=>btn.addEventListener("click",()=>simulateScenario(btn.dataset.scenario)));
+    }
+
+    function buildTimeline(){
+      master?.kill?.();
+      master = gsap.timeline({paused:true});
+      steps.forEach((_,i)=>{
+        master.addLabel(`step-${i}`).call(()=>renderStep(i)).to({}, {duration:STEP_SECONDS});
+      });
+      master.eventCallback("onComplete",()=>{playing=false; showToast("21 幕演示完成：通信可靠性闭环已闭合");});
+    }
+
+    // 渲染单个业务步骤：同步流程、状态、日志、详情与三栏视觉。
+    function renderStep(index){
+      currentStep=Math.max(0,Math.min(steps.length-1,index));
+      const step=steps[currentStep];
+      clearTransient();
+      $$(".flow-node").forEach((n,i)=>{n.classList.toggle("active",i===currentStep);n.classList.remove("selected","error","retry","rollback")});
+      const active=$(`.flow-node[data-step="${currentStep}"]`); active?.scrollIntoView({block:"nearest",behavior:"smooth"});
+      selectDetails(currentStep,false);
+      $("#stepCopy").textContent=`Step ${String(currentStep+1).padStart(2,"0")} · ${step.title}`;
+      $("#stepCounter").textContent=`${String(currentStep+1).padStart(2,"0")} / ${steps.length}`;
+      $("#progressBar").style.width=`${((currentStep+1)/steps.length)*100}%`;
+      $("#objectBadge").textContent=step.status.messageId;
+      $("#stateBadge").textContent=step.status.state.toUpperCase();
+      Object.entries(step.status).forEach(([k,v])=>{const el=$(`[data-status="${k}"]`);if(el)el.textContent=v});
+      $("[data-status='step']").textContent=step.shortLabel;
+      $("[data-status='heartbeat']").textContent=currentStep<1?"Waiting":currentStep===16?"Missed · reconnect":"Healthy · 30s";
+      updateRibbon(currentStep);
+      appendLog(step.log,step.logType||"");
+      updateMessage(step.visual);
+      runVisual(step.visual);
+    }
+
+    function selectDetails(index,userSelected){
+      const s=steps[index];
+      $$(".flow-node").forEach((n,i)=>n.classList.toggle("selected",userSelected&&i===index));
+      $("#detailTitle").textContent=s.title; $("#detailNo").textContent=`STEP ${String(index+1).padStart(2,"0")}`;
+      $("#detailPurpose").textContent=s.purpose; $("#detailInput").textContent=s.input; $("#detailOutput").textContent=s.output;
+      $("#detailTech").innerHTML=s.tech.map(v=>`<li>${v}</li>`).join(""); $("#detailAbnormal").innerHTML=s.abnormal.map(v=>`<li>${v}</li>`).join("");
+      $("#detailRelation").textContent=s.relation; $("#detailEnglish").textContent=s.english;
+    }
+
+    function updateRibbon(index){
+      const ranges=[3,5,7,12,15,17,20];
+      const group=ranges.findIndex(v=>index<=v);
+      $$(".loop-chip").forEach((c,i)=>c.classList.toggle("active",i===group));
+    }
+
+    function appendLog(message,type=""){
+      const seconds=currentStep; const time=`10:15:${String(seconds).padStart(2,"0")}`;
+      $("#logWindow").insertAdjacentHTML("beforeend",`<div class="log-line ${type}"><time>[${time}]</time> ${message}</div>`);
+      $("#logWindow").scrollTop=$("#logWindow").scrollHeight;
+    }
+
+    function setAck(name,kind=""){
+      $$(".ack-chip").forEach(c=>{c.classList.toggle("live",c.dataset.ack===name);c.classList.toggle("error",c.dataset.ack===name&&kind==="error")});
+      const ack=$("[data-status='ack']"); if(ack)ack.textContent=name;
+    }
+
+    function setOutbox(count,dropped=0){
+      $$("#outbox .slot").forEach((slot,i)=>{slot.className="slot";if(i<count)slot.classList.add(i===count-1&&count>4?"critical":"filled");if(dropped&&i>=6-dropped)slot.className="slot dropped"});
+      $("#outboxLabel").textContent=`${count} / 6${dropped?` · ${dropped} drop`:""}`; $("[data-status='outbox']").textContent=dropped?`${count} / 6 · ${dropped} dropped`:String(count);
+    }
+
+    // 将每一步的业务对象投影为可阅读的 MQTT / 本地消息卡片。
+    function updateMessage(kind){
+      const views={
+        "config":["GatewayConfig","LOCAL → RUNTIME","schema validated",`{\n  "gatewayId": "GW01",\n  "brokerUrl": "mqtt://broker.local",\n  "clientId": "GW01-F1-L1",\n  "keepAliveSeconds": 30,\n  "devices": ["METER01", "PLC01"],\n  "currentConfigVersion": "v12"\n}`],
+        "connect":["MQTT CONNECT","GW01 → BROKER","KeepAlive 30s · Clean Start",`{ "clientId": "GW01-F1-L1", "keepAlive": 30, "cleanStart": true }`],
+        "lwt":["LAST WILL","BROKER CUSTODY","QoS 1 · retain true",`{\n  "gatewayId": "GW01",\n  "status": "offline",\n  "reason": "unexpected_disconnect",\n  "timestamp": "2026-07-03T10:15:03+08:00"\n}`],
+        "online":["GATEWAY STATUS","GW01 → BROKER → CLOUD","QoS 1 · retain true",`{\n  "gatewayId": "GW01", "status": "online",\n  "version": "1.0.0", "ip": "192.168.1.10",\n  "timestamp": "2026-07-03T10:15:04+08:00"\n}`],
+        "subscribe":["SUBSCRIBE","GW01 → BROKER","QoS 1 requested",`[ "cmd/down", "config/down", "time/sync", "ota/down" ]`],
+        "devices":["DEVICE STATUS","GW01 → BROKER","QoS 1 · retain true",`{ "deviceId": "PLC01", "status": "online", "driver": "Modbus TCP" }`],
+        "collect":["TELEMETRY ENVELOPE","METER01 → GW01","local sample",`{\n  "gatewayId": "GW01", "deviceId": "METER01",\n  "bootId": "boot-01-10241", "sequenceId": 287,\n  "quality": "Good", "payload": { "temperature": 24.6 }\n}`],
+        "telemetry":["TELEMETRY PUBLISH","GW01 → BROKER → CLOUD","QoS 1 · not retained",`Topic: ${BASE}/device/METER01/telemetry\n{ "bootId": "boot-01-10241", "sequenceId": 287, "quality": "Good", "value": 24.6 }`],
+        "command-in":["COMMAND DOWN","CLOUD → BROKER → GW01","QoS 1 · messageId",`{\n  "messageId": "${CMD_ID}", "targetDeviceId": "PLC01",\n  "command": "StartMeasure", "parameters": { "mode": "auto" }\n}`],
+        "validate":["COMMAND VALIDATION","GW01 SAFETY BOUNDARY","topic · schema · whitelist · range · TTL",`{ "messageId": "${CMD_ID}", "validation": "PASSED", "deviceOnline": true }`],
+        "idempotency":["IDEMPOTENCY LOOKUP","GW01 → RESULT CACHE","first delivery · cache MISS",`{ "messageId": "${CMD_ID}", "cache": "MISS", "action": "RESERVE_EXECUTION" }`],
+        "execute":["LOCAL COMMAND","GW01 → PLC01","Modbus TCP · timeout 3000ms",`{ "messageId": "${CMD_ID}", "write": "StartMeasure", "state": "EXECUTING" }`],
+        "cmd-ack":["COMMAND ACK","GW01 → BROKER → CLOUD","QoS 1 · business terminal state",`{ "messageId": "${CMD_ID}", "status": "SUCCEEDED", "deviceId": "PLC01" }`],
+        "config-in":["CONFIG DOWN","CLOUD → BROKER → GW01","QoS 1 · candidate only",`{ "messageId": "cfg-20260703-v13", "gatewayId": "GW01", "version": "v13", "checksum": "sha256:8ac…" }`],
+        "config-validate":["CONFIG VALIDATION","CANDIDATE → CHECKS","schema · version · checksum",`{ "candidate": "v13", "current": "v12", "versionCheck": true, "checksumCheck": true }`],
+        "config-apply":["CONFIG ACK / CURRENT","GW01 → BROKER → CLOUD","QoS 1 · config/current retained",`{ "messageId": "cfg-20260703-v13", "status": "APPLIED", "activeVersion": "v13" }`],
+        "disconnect":["CONNECTION EVENT","KEEPALIVE → RECONNECT FSM","exponential backoff + jitter",`{ "state": "BrokerDisconnected", "retryScheduleSeconds": [1, 2, 4, 8] }`],
+        "outbox":["OUTBOX POLICY","PUBLISHER → BOUNDED QUEUE","capacity 6 · TTL · priority",`{ "count": 6, "buffered": 4, "dropped": 2, "policy": "drop-low-priority" }`],
+        "recovery":["RECOVERY CHECKLIST","GW01 ↔ BROKER","connect + subscribe + online + flush",`{ "connected": true, "subscribed": true, "onlinePublished": true, "validOutboxFlushed": 4 }`],
+        "device-fault":["DEVICE STATUS","GW01 → BROKER → CLOUD","QoS 1 · retain true",`{ "deviceId": "PLC01", "status": "offline", "reason": "local_timeout", "quality": "Bad" }`],
+        "complete":["LOOP EVIDENCE","FIELD ↔ GW ↔ BROKER ↔ CLOUD","observable · controllable · recoverable",`{ "gateway": "online", "devices": "tracked", "commandAck": "closed", "config": "v13", "outbox": "controlled" }`],
+        "broker-fail":["CONNECT FAILURE","GW01 ✕ BROKER","retry 1s · 2s · 4s · 8s",`{ "state": "BrokerDisconnected", "causes": ["network", "auth", "TLS", "brokerUrl"] }`],
+        "last-will":["LAST WILL FIRED","BROKER → CLOUD","QoS 1 · retained offline",`{ "gatewayId": "GW01", "status": "offline", "reason": "unexpected_disconnect" }`],
+        "device-fail":["DEVICE FAULT","METER01 ✕ GW01","Gateway stays online",`{ "deviceId": "METER01", "status": "offline", "telemetryQuality": "Bad" }`],
+        "publish-fail":["PUBLISH FAILURE","GW01 → OUTBOX","bounded · drop-oldest",`{ "count": 6, "dropped": 2, "criticalMessagesKept": true }`],
+        "invalid-command":["REJECTED ACK","GW01 → BROKER → CLOUD","no PLC write",`{ "messageId": "${CMD_ID}", "status": "REJECTED", "reason": "parameter_out_of_range" }`],
+        "device-offline":["FAILED ACK","GW01 → BROKER → CLOUD","device precondition failed",`{ "messageId": "${CMD_ID}", "status": "FAILED", "reason": "device_offline" }`],
+        "command-timeout":["TIMED_OUT ACK","GW01 → BROKER → CLOUD","timeoutMs 3000",`{ "messageId": "${CMD_ID}", "status": "TIMED_OUT", "timeoutMs": 3000 }`],
+        "duplicate-command":["DUPLICATED ACK","CACHE → BROKER → CLOUD","skip second PLC write",`{ "messageId": "${CMD_ID}", "cache": "HIT", "previousResult": "SUCCEEDED" }`],
+        "old-config":["CONFIG REJECTED","VERSION CHECK → CLOUD","current remains v13",`{ "candidate": "v11", "current": "v13", "status": "rejected_old_version" }`],
+        "checksum-fail":["CONFIG FAILED","CANDIDATE → ROLLBACK","last-known-good v13",`{ "candidate": "v14", "checksum": "MISMATCH", "status": "FAILED", "rollbackTo": "v13" }`]
+      };
+      const v=views[kind]||views.config;
+      $("#messageKind").textContent=v[0]; $("#messageDirection").textContent=v[1]; $("#messageFlags").textContent=v[2]; $("#messageJson").textContent=v[3];
+    }
+
+    function clearTransient(){
+      gsap.killTweensOf(".packet,.field-token");
+      $$(".packet,.field-token").forEach(e=>{e.style.opacity=0;e.style.transform=""});
+      $$(".svg-node").forEach(e=>e.classList.remove("active","offline","poweroff"));
+      $("#brokerGroup").classList.remove("broker-error","reconnecting","flash"); $("#broker-box").classList.remove("active","error"); $("#cloudNode .stage-node").classList.remove("active","error"); $("#mqttGateway .stage-node").classList.remove("active","error");
+      $$(".local-line").forEach(e=>e.classList.remove("active","error")); $$(".topic-chip").forEach(e=>e.classList.remove("live")); $$(".ack-chip").forEach(e=>e.classList.remove("live","error"));
+      $("#cacheRow").classList.remove("hit","flash"); $("#rollbackArrow").classList.remove("show"); $("#candidateBox").classList.remove("fail"); $("#willCard").classList.remove("flash"); $("#outboxCard").classList.remove("flash");
+      $$(".scenario").forEach(e=>e.classList.remove("active"));
+    }
+
+    function packet(el,from,to,color){
+      const node=$(el); if(!node)return;
+      node.style.color=color||"var(--cyan)";
+      gsap.fromTo(node,{x:from[0],y:from[1],opacity:1,scale:.8},{x:to[0],y:to[1],opacity:1,scale:1,duration:.78,ease:"power2.inOut",onComplete:()=>gsap.to(node,{opacity:0,duration:.22,delay:.18})});
+    }
+
+    function uplink(el,y,color){ packet(el,[96,y],[310,y],color); setTimeout(()=>packet(el,[310,y],[550,y],color),850); }
+    function downlink(el,y,color){ packet(el,[550,y],[310,y],color); setTimeout(()=>packet(el,[310,y],[96,y],color),850); }
+
+    function runVisual(kind){
+      const gw=$("#gatewayNode"),meter=$("#meterNode"),plc=$("#plcNode"),broker=$("#broker-box"),cloud=$("#cloudNode .stage-node"),mqttGw=$("#mqttGateway .stage-node");
+      switch(kind){
+        case "config": gw.classList.add("active"); $("#fieldGateway").textContent="Config v12 Loaded"; $("#candidateBox").textContent="Candidate: —"; break;
+        case "connect": gw.classList.add("active"); mqttGw.classList.add("active"); broker.classList.add("active"); $("#mqttGwLed").setAttribute("fill","#35d49a"); $("#fieldGateway").textContent="MQTT Connecting"; packet("#statusPacket",[96,54],[310,54],"#35d49a"); break;
+        case "lwt": broker.classList.add("active"); $("#willCard").classList.add("flash"); break;
+        case "online": gw.classList.add("online"); broker.classList.add("active"); cloud.classList.add("active"); $("#fieldGateway").textContent="Online"; uplink("#statusPacket",54,"#35d49a"); break;
+        case "subscribe": mqttGw.classList.add("active"); $$("#subscribeTopics .topic-chip").forEach(e=>e.classList.add("live")); downlink("#downPacket",112,"#bf83ff"); break;
+        case "devices": gw.classList.add("online","active"); meter.classList.add("online","active"); plc.classList.add("online","active"); $("#meterLine").classList.add("active"); $("#plcLine").classList.add("active"); $("#fieldDevice").textContent="METER01 + PLC01 Online"; uplink("#statusPacket",54,"#35d49a"); break;
+        case "collect": meter.classList.add("online","active"); gw.classList.add("online","active"); $("#meterLine").classList.add("active"); $("#qualityValue").textContent="Good · seq 287"; $("#qualityValue").className="good-quality"; packet("#telemetryFieldToken",[92,115],[180,316],"#2dd4e8"); break;
+        case "telemetry": meter.classList.add("online");gw.classList.add("online","active");broker.classList.add("active");cloud.classList.add("active");$("#publishTopics .topic-chip:nth-child(3)").classList.add("live");uplink("#upPacket",82,"#2dd4e8");break;
+        case "command-in": plc.classList.add("online");gw.classList.add("online","active");broker.classList.add("active");downlink("#downPacket",112,"#bf83ff");setAck("RECEIVED");break;
+        case "validate": gw.classList.add("online","active");setAck("RECEIVED");$("#commandValue").textContent="Validated";break;
+        case "idempotency": $("#cacheResult").textContent="MISS";$("#cacheRow").classList.add("flash");setAck("RECEIVED");break;
+        case "execute": gw.classList.add("online","active");plc.classList.add("online","active");$("#plcLine").classList.add("active");$("#commandValue").textContent="StartMeasure · Executing";packet("#commandFieldToken",[180,316],[270,115],"#bf83ff");setAck("EXECUTING");break;
+        case "cmd-ack": plc.classList.add("online");gw.classList.add("online","active");$("#cacheResult").textContent="SUCCEEDED";setAck("SUCCEEDED");uplink("#ackPacket",169,"#f4c451");break;
+        case "config-in": downlink("#configPacket",140,"#ff934f");$("#candidateBox").textContent="Candidate: v13";break;
+        case "config-validate": $("#candidateBox").textContent="Candidate: v13 · checksum OK";$("#configCard").classList.add("flash");break;
+        case "config-apply": $("#candidateBox").textContent="Candidate: —";$("#currentBox").textContent="Current: v13";$("#lkgBox").textContent="Last-known-good: v13";setAck("SUCCEEDED");uplink("#ackPacket",169,"#f4c451");break;
+        case "disconnect": gw.classList.add("online");$("#brokerGroup").classList.add("broker-error","reconnecting");broker.classList.add("error");$("#mqttGateway .stage-node").classList.add("error");$("#fieldGateway").textContent="Reconnecting 1s→8s";setOutbox(1);break;
+        case "outbox": $("#brokerGroup").classList.add("broker-error");setOutbox(6,2);$("#outboxCard").classList.add("flash");break;
+        case "recovery": gw.classList.add("online","active");meter.classList.add("online");plc.classList.add("online");broker.classList.add("active");cloud.classList.add("active");setOutbox(0);uplink("#statusPacket",54,"#35d49a");$$("#subscribeTopics .topic-chip").forEach(e=>e.classList.add("live"));break;
+        case "device-fault": gw.classList.add("online");meter.classList.add("online");plc.classList.add("offline");$("#plcLine").classList.add("error");$("#fieldDevice").textContent="PLC01 Offline · GW01 Online";$("#qualityValue").textContent="Bad / Uncertain";$("#qualityValue").className="bad-quality";setAck("FAILED","error");uplink("#statusPacket",54,"#35d49a");break;
+        case "complete": gw.classList.add("online","active");meter.classList.add("online");plc.classList.add("online");broker.classList.add("active");cloud.classList.add("active");$("#resultCard").classList.add("complete");setOutbox(0);break;
+      }
+    }
+
+    // 十种可点击故障注入：不破坏主时间线，可随时 Restart 恢复。
+    function simulateScenario(id){
+      master?.pause(); playing=false; clearTransient();
+      const sc=scenarios.find(s=>s.id===id); if(!sc)return;
+      $(`[data-scenario="${id}"]`).classList.add("active"); selectDetails(sc.step,true);
+      updateMessage(id);
+      const flow=$(`.flow-node[data-step="${sc.step}"]`); flow?.classList.add(id.includes("broker")?"retry":id.includes("checksum")?"rollback":"error");
+      const set=(key,val)=>{const el=$(`[data-status="${key}"]`);if(el)el.textContent=val};
+      switch(id){
+        case "broker-fail": $("#brokerGroup").classList.add("broker-error","reconnecting");$("#mqttGateway .stage-node").classList.add("error");set("state","Reconnecting");set("gateway","BrokerDisconnected");appendLog("CONNECT failed: network/auth/TLS; retry in 1s / 2s / 4s / 8s","error");break;
+        case "last-will": $("#gatewayNode").classList.add("poweroff");$("#willCard").classList.add("flash");uplink("#statusPacket",54,"#ff5f6d");$("#cloudNode .stage-node").classList.add("error");set("state","Unexpected Disconnect");set("gateway","Offline by LWT");appendLog("GW01 vanished; Broker publishes retained offline automatically","error");break;
+        case "device-fail": $("#meterNode").classList.add("offline");$("#meterLine").classList.add("error");set("gateway","Online");set("deviceStatus","METER01 Offline");set("state","quality=Bad");uplink("#statusPacket",54,"#35d49a");appendLog("METER01 timeout; publish device/status offline, telemetry quality=Bad","error");break;
+        case "publish-fail": $("#brokerGroup").classList.add("broker-error");setOutbox(6,2);set("state","Buffered / Dropped");appendLog("Telemetry publish failed; Outbox full, drop-oldest low-priority samples","warn");break;
+        case "invalid-command": downlink("#downPacket",112,"#bf83ff");setAck("REJECTED","error");set("state","Validation Failed");appendLog(`${CMD_ID} rejected: parameter out of range / whitelist denied`,"error");break;
+        case "device-offline": $("#plcNode").classList.add("offline");$("#plcLine").classList.add("error");setAck("FAILED","error");set("deviceStatus","PLC01 Offline");set("state","reason=device_offline");appendLog("Command not forwarded: PLC01 offline; publish FAILED ACK","error");break;
+        case "command-timeout": $("#plcNode").classList.add("online","active","flash");packet("#commandFieldToken",[180,316],[270,115],"#bf83ff");setAck("TIMED_OUT","error");set("state","Timed Out · 3000ms");appendLog(`${CMD_ID} execution exceeded timeoutMs=3000; publish TIMED_OUT`,"warn");break;
+        case "duplicate-command": $("#cacheRow").classList.add("hit","flash");$("#cacheResult").textContent="HIT · SUCCEEDED";setAck("DUPLICATED");set("state","Duplicate Suppressed");appendLog(`${CMD_ID} duplicated by QoS 1; skip PLC write and return cached result`,"warn");break;
+        case "old-config": $("#candidateBox").textContent="Candidate: v11 · OLD";$("#candidateBox").classList.add("fail");set("state","rejected_old_version");set("config","v13 unchanged");appendLog("Reject config v11: older than current v13; config/current unchanged","warn");break;
+        case "checksum-fail": $("#candidateBox").textContent="Candidate: v14 · checksum ERROR";$("#candidateBox").classList.add("fail");$("#currentBox").textContent="Current: v13";$("#lkgBox").textContent="Last-known-good: v13";$("#rollbackArrow").classList.add("show");set("state","Rollback");set("config","v13 last-known-good");appendLog("Config v14 checksum/apply failed; rollback to v13 and publish config/ack failed","error");break;
+      }
+      showToast(`已注入：${sc.title}`);
+    }
+
+    function showToast(message){clearTimeout(toastTimer);$("#toast").textContent=message;$("#toast").classList.add("show");toastTimer=setTimeout(()=>$("#toast").classList.remove("show"),2200)}
+
+    $("#playBtn").addEventListener("click",()=>{if(currentStep===steps.length-1){master.seek(0);$("#logWindow").innerHTML="";$("#resultCard").classList.remove("complete")}master.play();playing=true;showToast("时间线继续播放")});
+    $("#pauseBtn").addEventListener("click",()=>{master.pause();playing=false;showToast("已暂停，可点击节点查看细节")});
+    $("#restartBtn").addEventListener("click",()=>{$("#logWindow").innerHTML="";$("#resultCard").classList.remove("complete");buildTimeline();renderStep(0);master.seek(master.labels["step-0"]+.01);master.play();playing=true;showToast("从 Step 01 重新开始")});
+    $("#nextBtn").addEventListener("click",()=>{master.pause();playing=false;const next=(currentStep+1)%steps.length;const pos=master.labels[`step-${next}`]||0;master.seek(pos+.01);renderStep(next);showToast(`单步：${steps[next].title}`)});
+
+    buildUI(); buildTimeline(); renderStep(0); master.seek(.01);
+    setTimeout(()=>{master.play();playing=true;},900);
+  </script>
+</body>
+</html>
