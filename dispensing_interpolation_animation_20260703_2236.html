@@ -1,0 +1,1033 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>上位机点胶轨迹插补动画小剧场</title>
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+  <style>
+    :root {
+      --bg: #06101a;
+      --panel: #0b1b2a;
+      --panel2: #0d2234;
+      --line: #1e3b52;
+      --line2: #2c536d;
+      --text: #d8eaff;
+      --muted: #7996ab;
+      --blue: #36aef5;
+      --cyan: #3de5dc;
+      --green: #49df91;
+      --orange: #ffad4d;
+      --red: #ff5d6c;
+      --gray: #526a7d;
+      --shadow: 0 16px 44px rgba(0,0,0,.26);
+    }
+
+    * { box-sizing: border-box; }
+    html { color-scheme: dark; scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      min-width: 1180px;
+      min-height: 100vh;
+      color: var(--text);
+      font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background:
+        radial-gradient(circle at 18% -5%, rgba(42,139,198,.19), transparent 31%),
+        radial-gradient(circle at 82% 4%, rgba(30,171,159,.11), transparent 28%),
+        linear-gradient(180deg, #06101a 0%, #081521 55%, #061019 100%);
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: .28;
+      background-image:
+        linear-gradient(rgba(83,126,159,.055) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(83,126,159,.055) 1px, transparent 1px);
+      background-size: 28px 28px;
+    }
+    button { font: inherit; }
+    .app { width: min(1880px, calc(100% - 28px)); margin: 0 auto; padding: 16px 0 34px; }
+
+    .hero {
+      position: relative;
+      overflow: hidden;
+      padding: 18px 22px 17px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: linear-gradient(135deg, rgba(14,37,58,.97), rgba(8,24,38,.97));
+      box-shadow: var(--shadow);
+    }
+    .hero::after {
+      content: "G01 · G02";
+      position: absolute;
+      right: 24px;
+      top: -4px;
+      color: rgba(73,188,245,.045);
+      font: 900 80px/1.1 "SFMono-Regular", Consolas, monospace;
+      letter-spacing: -7px;
+      pointer-events: none;
+    }
+    .eyebrow { color: var(--cyan); font-size: 11px; font-weight: 900; letter-spacing: .15em; text-transform: uppercase; }
+    h1 { position: relative; z-index: 1; margin: 6px 0 5px; font-size: clamp(24px, 2vw, 34px); letter-spacing: -.025em; }
+    .subtitle { position: relative; z-index: 1; margin: 0; max-width: 1500px; color: #a6bdd0; font-size: 12px; line-height: 1.72; }
+    .concept-line { display: flex; align-items: center; gap: 6px; margin-top: 12px; flex-wrap: wrap; }
+    .concept-line span { padding: 5px 7px; border: 1px solid #29516d; border-radius: 6px; color: #9dd8f5; background: rgba(25,75,107,.27); font-size: 9px; font-weight: 800; }
+    .concept-line i { color: var(--blue); font-style: normal; font-size: 10px; }
+
+    .control-deck {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      align-items: center;
+      gap: 12px;
+      margin-top: 11px;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(8,22,35,.95);
+      box-shadow: var(--shadow);
+    }
+    .controls { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+    .control-btn {
+      min-height: 34px;
+      padding: 7px 11px;
+      border: 1px solid #2b4b63;
+      border-radius: 8px;
+      color: #c7d9e7;
+      background: #10263a;
+      cursor: pointer;
+      transition: .18s ease;
+      font-size: 10px;
+      font-weight: 850;
+    }
+    .control-btn:hover { border-color: var(--blue); color: white; transform: translateY(-1px); }
+    .control-btn.primary { border-color: #208cca; color: white; background: linear-gradient(135deg, #137fba, #195b95); }
+    .control-btn.toggle { border-color: #786238; color: #ffd58f; }
+    .control-btn.alarm { border-color: #783743; color: #ff9da8; }
+    .control-btn.reset { border-color: #376959; color: #9af5cb; }
+    .status-strip { display: grid; grid-template-columns: repeat(8, minmax(88px, 1fr)); gap: 6px; }
+    .status-chip { min-width: 0; padding: 7px 8px; border-left: 2px solid var(--blue); border-radius: 7px; background: #0a1c2c; }
+    .status-chip small { display: block; margin-bottom: 3px; color: var(--muted); font-size: 8px; letter-spacing: .07em; text-transform: uppercase; }
+    .status-chip strong { display: block; overflow: hidden; color: #d7eaff; font: 750 10px/1.3 "SFMono-Regular", Consolas, monospace; white-space: nowrap; text-overflow: ellipsis; }
+    .status-chip.live strong { color: var(--cyan); }
+    .status-chip.ok strong { color: var(--green); }
+    .status-chip.ng strong { color: var(--orange); }
+    .status-chip.alarm strong { color: var(--red); }
+
+    .step-narrator {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      align-items: center;
+      gap: 11px;
+      margin-top: 8px;
+      padding: 9px 12px;
+      border: 1px solid #28506a;
+      border-radius: 10px;
+      background: linear-gradient(90deg, rgba(29,94,133,.25), rgba(9,29,44,.8));
+    }
+    .step-number { color: var(--cyan); font: 900 11px/1 "SFMono-Regular", monospace; }
+    #stepDescription { color: #c7ddec; font-size: 11px; line-height: 1.5; }
+    .step-mode { color: #7295ad; font-size: 9px; letter-spacing: .09em; }
+
+    .main-grid {
+      display: grid;
+      grid-template-columns: minmax(430px, 1.08fr) minmax(430px, .98fr) minmax(355px, .78fr);
+      gap: 11px;
+      margin-top: 11px;
+      align-items: start;
+    }
+    .panel { min-width: 0; border: 1px solid var(--line); border-radius: 15px; background: linear-gradient(180deg, rgba(13,31,48,.98), rgba(8,21,34,.98)); box-shadow: var(--shadow); }
+    .panel-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 13px 9px; border-bottom: 1px solid rgba(42,75,99,.7); }
+    .panel-head h2 { margin: 0; font-size: 13px; letter-spacing: .01em; }
+    .panel-head .tag { color: var(--muted); font: 750 8px/1 monospace; letter-spacing: .08em; }
+    .panel-body { padding: 9px; }
+
+    .scene-wrap { position: relative; overflow: hidden; border: 1px solid #1b3b53; border-radius: 11px; background: linear-gradient(180deg, #081725, #0a1d2b 60%, #0b2130); }
+    #factoryScene { display: block; width: 100%; height: auto; min-height: 578px; }
+    #factoryScene text { font-family: Inter, "PingFang SC", sans-serif; user-select: none; }
+    .floor { fill: #0b2231; stroke: #1a3d53; }
+    .gridline { stroke: #18384d; stroke-width: .6; opacity: .55; }
+    .device .case { fill: #10283b; stroke: #31546d; stroke-width: 1.4; transition: .2s; }
+    .device text { fill: #abc5d8; font-size: 8px; font-weight: 760; }
+    .device .sub { fill: #67879d; font-size: 6.5px; font-weight: 600; }
+    .device .led { fill: #455d6f; transition: .2s; }
+    .device.active .case { stroke: var(--cyan); filter: drop-shadow(0 0 7px rgba(61,229,220,.45)); }
+    .device.active .led, .led.on { fill: var(--green); filter: drop-shadow(0 0 5px rgba(73,223,145,.75)); }
+    .device.alarm .case { stroke: var(--red); filter: drop-shadow(0 0 8px rgba(255,93,108,.55)); }
+    .device.alarm .led, .led.bad { fill: var(--red); filter: drop-shadow(0 0 6px rgba(255,93,108,.8)); }
+    .bus { fill: none; stroke: #294b62; stroke-width: 1.2; stroke-dasharray: 4 4; }
+    .bus.active { stroke: var(--blue); animation: dashFlow 1s linear infinite; filter: drop-shadow(0 0 4px rgba(54,174,245,.75)); }
+    .bus.feedback { stroke: var(--green); animation: dashBack 1s linear infinite; }
+    .bus.process { stroke: var(--orange); animation: dashFlow 1s linear infinite; }
+    .bus.alarm { stroke: var(--red); animation: dashFlow .45s linear infinite; }
+    @keyframes dashFlow { to { stroke-dashoffset: -16; } }
+    @keyframes dashBack { to { stroke-dashoffset: 16; } }
+    .platform { fill: #122d41; stroke: #315a73; stroke-width: 2; }
+    .workpiece { fill: #263b48; stroke: #668295; stroke-width: 1.5; }
+    .fixture { fill: #183449; stroke: #4b7288; }
+    .clamp-jaw { fill: #507083; stroke: #7d9aaa; transition: transform .35s ease; }
+    .clamped .left-jaw { transform: translateX(8px); }
+    .clamped .right-jaw { transform: translateX(-8px); }
+    #pathPreview { fill: none; stroke: #4dbfe9; stroke-width: 2; stroke-dasharray: 5 4; opacity: 0; }
+    #pathOriginal { fill: none; stroke: #778b9b; stroke-width: 1.2; stroke-dasharray: 3 4; opacity: 0; }
+    #gluePath { fill: none; stroke: #67f0a6; stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 0 4px rgba(73,223,145,.6)); }
+    #pathBounds { fill: rgba(61,229,220,.035); stroke: var(--cyan); stroke-width: 1; stroke-dasharray: 5 4; opacity: 0; }
+    #softLimit { fill: rgba(73,223,145,.025); stroke: rgba(73,223,145,.45); stroke-dasharray: 4 5; opacity: 0; }
+    #nozzleTravel { filter: drop-shadow(0 0 5px rgba(75,196,240,.5)); }
+    #nozzleZ { transform: translateY(-48px); transition: transform .45s ease; }
+    #nozzleZ.down { transform: translateY(-11px); }
+    .needle { fill: #cbdde5; stroke: #e6f5fb; }
+    .valve-body { fill: #23506c; stroke: #5da4c7; }
+    .valve-on .valve-body { fill: #1f836a; stroke: #68efb0; filter: drop-shadow(0 0 7px rgba(73,223,145,.75)); }
+    #glueDrop { fill: var(--green); opacity: 0; filter: drop-shadow(0 0 4px rgba(73,223,145,.8)); }
+    #cameraFlash { fill: rgba(128,235,255,.2); opacity: 0; }
+    #alarmHalo { fill: rgba(255,93,108,.16); opacity: 0; }
+    .alarm-flash #alarmHalo { opacity: 1; animation: alarmPulse .65s ease-in-out infinite alternate; }
+    @keyframes alarmPulse { from { transform: scale(.82); transform-origin: center; } to { transform: scale(1.22); transform-origin: center; } }
+    .scene-legend { display: grid; grid-template-columns: repeat(4,1fr); gap: 5px; margin-top: 7px; }
+    .scene-legend span { padding: 6px 7px; border: 1px solid #203c50; border-radius: 6px; color: #809caf; background: #091a29; font-size: 8px; }
+    .dot { display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 50%; vertical-align: 0; }
+
+    .tech-stack { display: grid; gap: 7px; }
+    .tech-card { border: 1px solid #1e3d54; border-radius: 9px; background: #0a1c2c; overflow: hidden; }
+    .tech-card-head { display: flex; justify-content: space-between; align-items: center; padding: 7px 9px; border-bottom: 1px solid #19384e; background: #0e2335; }
+    .tech-card-head h3 { margin: 0; font-size: 9px; letter-spacing: .04em; }
+    .tech-card-head span { color: var(--muted); font: 700 7px/1 monospace; }
+    .tech-card-body { padding: 8px; }
+    .recipe-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 5px; }
+    .datum { min-width: 0; padding: 5px 6px; border-radius: 5px; background: #0d2639; }
+    .datum small { display: block; color: #6e91a8; font-size: 7px; }
+    .datum strong { display: block; overflow: hidden; margin-top: 2px; color: #cde6f6; font: 700 8px/1.3 "SFMono-Regular", monospace; text-overflow: ellipsis; white-space: nowrap; }
+    .datum.accent strong { color: var(--cyan); }
+    .dual { display: grid; grid-template-columns: 1.15fr .85fr; gap: 7px; }
+    .path-preview { position: relative; min-height: 145px; border: 1px solid #1b3a4f; border-radius: 7px; background: #081824; }
+    #debugPathSvg { width: 100%; height: 145px; display: block; }
+    .debug-grid { stroke: #17364b; stroke-width: .6; }
+    #debugGlue { fill: none; stroke: var(--green); stroke-width: 3.5; stroke-linecap: round; }
+    #debugRoute { fill: none; stroke: #397ea4; stroke-width: 1.5; stroke-dasharray: 4 3; }
+    #debugCursor { fill: #e8fbff; stroke: var(--cyan); stroke-width: 2; }
+    .point-strip { display: grid; grid-template-columns: repeat(3,1fr); gap: 3px; margin-top: 5px; }
+    .point-strip span { padding: 3px 4px; border: 1px solid #1d3c51; border-radius: 4px; color: #7697aa; background: #0a2030; font: 650 6.3px/1.2 "SFMono-Regular", monospace; white-space: nowrap; }
+    .point-strip b { color: #b8d1df; }
+    .segment-list { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; align-content: start; }
+    .segment { padding: 5px 6px; border: 1px solid #1e4057; border-radius: 5px; color: #7898ac; background: #0b2133; font-size: 7.5px; line-height: 1.25; }
+    .segment b { display: block; color: #adc5d4; font-size: 8px; }
+    .segment.active { border-color: var(--orange); color: #ffd097; background: rgba(128,79,29,.22); box-shadow: inset 2px 0 var(--orange); }
+    .segment.done { border-color: #2b6951; color: #82caa8; }
+
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    th { padding: 5px 3px; color: #698ca3; font-size: 6.7px; font-weight: 750; text-align: left; border-bottom: 1px solid #234156; }
+    td { padding: 5px 3px; color: #b9d0df; font: 700 7.3px/1.2 "SFMono-Regular", monospace; border-bottom: 1px solid rgba(31,59,78,.65); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    td.good { color: var(--green); }
+    td.warn { color: var(--orange); }
+    td.bad { color: var(--red); background: rgba(116,32,44,.22); }
+    .command-card { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; padding: 7px; border: 1px solid #21465f; border-radius: 7px; background: linear-gradient(90deg, #0e2b41, #0a1c2b); }
+    #currentCommand { overflow: hidden; color: var(--cyan); font: 750 9px/1.4 "SFMono-Regular", monospace; white-space: nowrap; text-overflow: ellipsis; }
+    #commandState { color: #7396aa; font: 700 7px/1 monospace; }
+    .valve-row { display: flex; gap: 4px; margin-top: 6px; }
+    .valve-state { flex: 1; padding: 5px 3px; border: 1px solid #214156; border-radius: 5px; color: #64869b; background: #0a1d2d; text-align: center; font-size: 6.8px; }
+    .valve-state.active { border-color: var(--orange); color: #ffe0aa; background: rgba(132,82,29,.24); }
+    .curve-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 5px; }
+    .curve-box { padding: 5px; border: 1px solid #1c3b51; border-radius: 6px; background: #081a28; }
+    .curve-title { display: flex; justify-content: space-between; color: #7595aa; font-size: 7px; }
+    .curve-title b { color: #bad2df; font-family: monospace; }
+    .curve-box svg { display: block; width: 100%; height: 56px; margin-top: 3px; }
+    .threshold { stroke: #775450; stroke-width: .7; stroke-dasharray: 3 3; }
+    .curve { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    #pressureCurve { stroke: var(--green); }
+    #errorCurve { stroke: var(--blue); }
+    #speedCurve { stroke: var(--orange); }
+    .checklist { display: grid; grid-template-columns: repeat(4,1fr); gap: 4px; margin-top: 6px; }
+    .check { padding: 4px; border: 1px solid #264459; border-radius: 4px; color: #65879d; text-align: center; font-size: 6.8px; }
+    .check.pass { border-color: #2f6852; color: var(--green); background: rgba(36,101,74,.14); }
+    .log-window { height: 92px; overflow-y: auto; padding: 7px; border: 1px solid #1c384b; border-radius: 7px; background: #06131e; font: 7.5px/1.55 "SFMono-Regular", Consolas, monospace; }
+    .log-line { display: grid; grid-template-columns: 46px 1fr; gap: 6px; color: #89a4b5; }
+    .log-line .time { color: #456a82; }
+    .log-line.ok .msg { color: #89e7b5; }
+    .log-line.warn .msg { color: #ffd28b; }
+    .log-line.alarm .msg { color: #ff8894; }
+    .result-card { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; padding: 7px 8px; border: 1px solid #29475a; border-radius: 7px; background: #0b2132; }
+    .result-mark { display: grid; place-items: center; width: 31px; height: 31px; border: 1px solid #34566d; border-radius: 50%; color: #7d9bad; font: 900 9px/1 monospace; }
+    .result-copy small { display: block; color: #66879c; font-size: 7px; }
+    .result-copy strong { display: block; margin-top: 2px; font-size: 9px; }
+    .result-card.ok { border-color: #2f7355; background: rgba(28,91,63,.18); }
+    .result-card.ok .result-mark, .result-card.ok strong { color: var(--green); border-color: var(--green); }
+    .result-card.ng { border-color: #7a5a31; background: rgba(111,72,25,.18); }
+    .result-card.ng .result-mark, .result-card.ng strong { color: var(--orange); border-color: var(--orange); }
+    .result-card.alarm { border-color: #7d3642; background: rgba(111,31,44,.2); }
+    .result-card.alarm .result-mark, .result-card.alarm strong { color: var(--red); border-color: var(--red); }
+
+    .flow-panel .panel-body { padding: 8px; }
+    .flow-shell { position: relative; height: 810px; overflow-y: auto; padding: 3px 4px 10px 22px; scrollbar-width: thin; scrollbar-color: #2c5269 #091a28; }
+    .flow-shell::before { content: ""; position: absolute; left: 11px; top: 18px; bottom: 18px; width: 1px; background: #2a4b61; }
+    #flowToken { position: absolute; z-index: 4; left: 4px; top: 14px; width: 15px; height: 15px; border: 2px solid #b9f7ff; border-radius: 50%; background: var(--blue); box-shadow: 0 0 11px rgba(54,174,245,.85); transition: top .42s ease, background .2s; }
+    .flow-section-label { margin: 7px 0 5px; color: #63869c; font: 750 7px/1 monospace; letter-spacing: .11em; }
+    .flow-node {
+      position: relative;
+      display: grid;
+      grid-template-columns: 22px 1fr auto;
+      gap: 7px;
+      align-items: center;
+      width: 100%;
+      margin: 0 0 5px;
+      padding: 7px;
+      border: 1px solid #213f53;
+      border-radius: 7px;
+      color: #b3cad8;
+      background: #0a1d2c;
+      cursor: pointer;
+      text-align: left;
+      transition: .18s ease;
+    }
+    .flow-node::before { content: ""; position: absolute; left: -11px; top: 50%; width: 10px; height: 1px; background: #2a4b61; }
+    .flow-node:hover { border-color: #3c6a84; transform: translateX(2px); }
+    .flow-index { display: grid; place-items: center; width: 21px; height: 21px; border: 1px solid #31546b; border-radius: 5px; color: #7396aa; font: 800 7px/1 monospace; }
+    .flow-copy strong { display: block; font-size: 8.5px; line-height: 1.25; }
+    .flow-copy small { display: block; margin-top: 2px; color: #627f92; font: 650 6.8px/1.2 monospace; }
+    .flow-kind { color: #52758a; font: 700 6.5px/1 monospace; }
+    .flow-node.selected { border-color: #397698; background: #0d2940; }
+    .flow-node.current { border-color: var(--cyan); background: linear-gradient(90deg, rgba(32,116,139,.35), #0b2132); box-shadow: 0 0 13px rgba(61,229,220,.14), inset 3px 0 var(--cyan); }
+    .flow-node.current .flow-index { color: var(--cyan); border-color: var(--cyan); }
+    .flow-node.ok { border-left: 2px solid #317b59; }
+    .flow-node.ng { border-left: 2px solid #8a6334; }
+    .flow-node.alarm { border-left: 2px solid #8b3d48; }
+    .flow-node.current.ok { border-color: var(--green); box-shadow: inset 3px 0 var(--green); }
+    .flow-node.current.ng { border-color: var(--orange); box-shadow: inset 3px 0 var(--orange); }
+    .flow-node.current.alarm { border-color: var(--red); box-shadow: inset 3px 0 var(--red); }
+
+    .detail-panel { margin-top: 11px; }
+    .detail-title { display: flex; align-items: center; gap: 10px; }
+    .detail-title span { display: grid; place-items: center; width: 29px; height: 29px; border-radius: 7px; color: var(--cyan); background: #12354c; font: 900 9px/1 monospace; }
+    .detail-title h2 { margin: 0; font-size: 13px; }
+    .detail-title small { color: #7091a6; font-size: 8px; }
+    .detail-grid { display: grid; grid-template-columns: 1.1fr 1fr 1fr 1.1fr; gap: 7px; padding: 10px; }
+    .detail-item { min-height: 78px; padding: 9px; border: 1px solid #1f3e53; border-radius: 8px; background: #091b2a; }
+    .detail-item.wide { grid-column: span 2; }
+    .detail-item h4 { margin: 0 0 5px; color: #6f91a7; font-size: 7.5px; text-transform: uppercase; letter-spacing: .08em; }
+    .detail-item p { margin: 0; color: #b8cedc; font-size: 9px; line-height: 1.55; }
+    .detail-item.english { border-color: #2a536b; background: linear-gradient(135deg, #0c2940, #091b2a); }
+    .detail-item.english p { color: #a7e6fa; font-family: "SFMono-Regular", Consolas, monospace; }
+
+    .footer-note { margin-top: 9px; color: #607f93; font-size: 8px; text-align: right; }
+    @media (max-width: 1450px) {
+      .status-strip { grid-template-columns: repeat(4,1fr); }
+      .main-grid { grid-template-columns: 1.05fr 1fr .78fr; }
+      .recipe-grid { grid-template-columns: repeat(2,1fr); }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <header class="hero">
+      <div class="eyebrow">DISPENSING_INTERPOLATION · INDUSTRIAL MOTION STORY</div>
+      <h1>上位机运动控制中的点胶轨迹插补</h1>
+      <p class="subtitle">这个动画展示上位机如何通过运动控制卡执行点胶轨迹插补。系统先加载点胶配方和路径数据，完成安全检查、伺服使能、回原点和工件夹紧，然后将直线段与圆弧段组成连续插补路径。运动过程中，点胶阀需要和轨迹位置同步打开和关闭，同时系统监控胶压、跟随误差和到位状态。重点不是单个 MoveAbs API，而是路径规划、连续运动、阀门时序、过程监控和异常恢复之间的关系。</p>
+      <div class="concept-line" aria-label="轨迹插补处理链">
+        <span>路径配方</span><i>→</i><span>坐标补偿</span><i>→</i><span>直线 / 圆弧插补</span><i>→</i><span>LookAhead 与拐角平滑</span><i>→</i><span>Z 高度 + 阀门同步</span><i>→</i><span>压力 / 跟随误差监控</span><i>→</i><span>质量追溯</span>
+      </div>
+    </header>
+
+    <section class="control-deck" aria-label="动画控制台">
+      <div class="controls">
+        <button class="control-btn primary" onclick="playAnimation()">▶ Play</button>
+        <button class="control-btn" onclick="pauseAnimation()">Ⅱ Pause</button>
+        <button class="control-btn" onclick="restartAnimation()">↺ Restart</button>
+        <button class="control-btn" onclick="stepNext()">Step Next →</button>
+        <button id="resultToggle" class="control-btn toggle" onclick="toggleInspectionResult()">Result Plan: OK</button>
+        <button class="control-btn alarm" onclick="injectPressureAlarm()">Inject Pressure Alarm</button>
+        <button class="control-btn alarm" onclick="injectFollowingError()">Inject Following Error</button>
+        <button class="control-btn reset" onclick="resetAlarm()">Reset Alarm</button>
+      </div>
+      <div class="status-strip">
+        <div class="status-chip"><small>workpieceId</small><strong id="stWorkpiece">WP-DISP-001</strong></div>
+        <div class="status-chip"><small>recipeId</small><strong id="stRecipe">RECIPE-SEAL-01</strong></div>
+        <div class="status-chip"><small>pathId</small><strong id="stPath">PATH-RECT-R4-001</strong></div>
+        <div class="status-chip"><small>motionCommandId</small><strong id="stCommand">CMD-INTERP-001</strong></div>
+        <div class="status-chip live"><small>motionState</small><strong id="stMotion">Idle</strong></div>
+        <div class="status-chip"><small>dispenseState</small><strong id="stValve">ValveOff</strong></div>
+        <div class="status-chip"><small>pressureState</small><strong id="stPressure">Normal</strong></div>
+        <div id="resultStatusChip" class="status-chip"><small>qualityResult / segment</small><strong><span id="stResult">Unknown</span> · S<span id="stSegment">0</span></strong></div>
+      </div>
+    </section>
+
+    <div class="step-narrator">
+      <span id="stepNumber" class="step-number">STEP 00 / 19</span>
+      <span id="stepDescription">等待启动：轨迹还没有被加载，阀门关闭，三轴处于 Idle。</span>
+      <span id="playMode" class="step-mode">PAUSED · MANUAL READY</span>
+    </div>
+
+    <section class="main-grid">
+      <article class="panel">
+        <div class="panel-head"><h2>工业现场：三轴点胶轨迹插补工站</h2><span class="tag">PHYSICAL LAYER</span></div>
+        <div class="panel-body">
+          <div id="sceneWrap" class="scene-wrap">
+            <svg id="factoryScene" viewBox="0 0 610 650" role="img" aria-label="三轴点胶工站动画">
+              <defs>
+                <marker id="arrowBlue" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0 0L6 3L0 6Z" fill="#36aef5"/></marker>
+                <marker id="arrowGreen" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0 0L6 3L0 6Z" fill="#49df91"/></marker>
+                <pattern id="floorGrid" width="20" height="20" patternUnits="userSpaceOnUse"><path d="M20 0H0V20" fill="none" class="gridline"/></pattern>
+              </defs>
+
+              <rect x="8" y="8" width="594" height="634" rx="10" class="floor"/>
+              <rect x="8" y="8" width="594" height="634" rx="10" fill="url(#floorGrid)"/>
+
+              <g id="ipc" class="device" transform="translate(22 28)">
+                <rect class="case" width="126" height="76" rx="6"/>
+                <rect x="9" y="10" width="108" height="43" rx="3" fill="#071724" stroke="#2c5b76"/>
+                <text x="16" y="24">IPC / HMI 上位机</text>
+                <text id="hmiRecipe" class="sub" x="16" y="38">Recipe: --</text>
+                <text id="hmiState" class="sub" x="16" y="48">State: Idle</text>
+                <circle class="led" cx="16" cy="64" r="3"/><text class="sub" x="24" y="67">Motion Module</text>
+              </g>
+              <g id="motionCard" class="device" transform="translate(184 28)">
+                <rect class="case" width="123" height="76" rx="6"/>
+                <path d="M13 21H108M13 33H108M13 45H108" stroke="#274b62"/>
+                <circle class="led" cx="17" cy="61" r="3"/><circle class="led" cx="29" cy="61" r="3"/><circle class="led" cx="41" cy="61" r="3"/>
+                <text x="13" y="15">Motion Card</text><text class="sub" x="51" y="64">XY Interpolation</text>
+              </g>
+              <g id="mes" class="device" transform="translate(470 28)">
+                <ellipse class="case" cx="55" cy="13" rx="48" ry="10"/>
+                <path class="case" d="M7 13V58C7 71 103 71 103 58V13M7 35C7 48 103 48 103 35"/>
+                <text x="25" y="31">SQL / MES</text><text class="sub" x="22" y="57">Traceability Data</text>
+              </g>
+
+              <path id="cmdBus" class="bus" d="M148 64H184" marker-end="url(#arrowBlue)"/>
+              <path id="mesBus" class="bus" d="M307 64H470" marker-end="url(#arrowGreen)"/>
+
+              <g id="servoX" class="device" transform="translate(336 26)"><rect class="case" width="105" height="38" rx="5"/><circle class="led" cx="13" cy="20" r="3"/><text x="23" y="17">X Servo Drive</text><text class="sub" x="23" y="28">Motor · 0.00 mm</text></g>
+              <g id="servoY" class="device" transform="translate(336 70)"><rect class="case" width="105" height="38" rx="5"/><circle class="led" cx="13" cy="20" r="3"/><text x="23" y="17">Y Servo Drive</text><text class="sub" x="23" y="28">Motor · 0.00 mm</text></g>
+              <g id="servoZ" class="device" transform="translate(336 114)"><rect class="case" width="105" height="38" rx="5"/><circle class="led" cx="13" cy="20" r="3"/><text x="23" y="17">Z Servo Drive</text><text class="sub" x="23" y="28">Motor · Safe Z</text></g>
+              <path id="servoBus" class="bus" d="M307 72C324 72 321 45 336 45M307 72H322V89H336M307 72H317V133H336" marker-end="url(#arrowBlue)"/>
+              <path id="feedbackBus" class="bus" d="M336 140H321V96H307" marker-end="url(#arrowGreen)"/>
+
+              <g id="glueController" class="device" transform="translate(22 132)">
+                <rect class="case" width="126" height="74" rx="6"/>
+                <path d="M19 23C19 10 58 10 58 23V57C58 67 19 67 19 57Z" fill="#17364a" stroke="#42708a"/>
+                <circle class="led" cx="87" cy="31" r="4"/><text x="68" y="18">Glue Tank</text><text class="sub" x="68" y="47">Pressure Ctrl</text><text id="pressureReadout" x="68" y="61">0.42 MPa</text>
+              </g>
+              <g id="pressureSensor" class="device" transform="translate(164 140)"><rect class="case" width="112" height="58" rx="6"/><circle class="led" cx="18" cy="30" r="6"/><text x="31" y="23">Pressure Sensor</text><text id="sensorState" class="sub" x="31" y="39">Normal · AI 2.16V</text></g>
+              <path id="pressureBus" class="bus process" d="M148 169H164"/>
+              <path id="sensorFeedback" class="bus" d="M220 140V116H245V104" marker-end="url(#arrowGreen)"/>
+
+              <g id="camera" class="device" transform="translate(504 130)"><rect class="case" width="76" height="51" rx="5"/><circle cx="24" cy="25" r="12" fill="#0b1e2d" stroke="#4c7891"/><circle cx="24" cy="25" r="5" fill="#2b6684"/><text x="42" y="23">Camera</text><text class="sub" x="42" y="36">XYθ Offset</text></g>
+              <path d="M528 181L454 294" stroke="#2d667f" stroke-dasharray="3 4"/>
+              <polygon id="cameraFlash" points="518,177 540,185 474,312 438,294"/>
+
+              <g id="safety" class="device" transform="translate(22 231)">
+                <rect class="case" width="126" height="70" rx="6"/>
+                <circle id="estopLed" class="led" cx="20" cy="22" r="6"/><text x="33" y="25">E-STOP Released</text>
+                <circle id="doorLed" class="led" cx="20" cy="42" r="4"/><text class="sub" x="33" y="45">Door / Air / Limit OK</text>
+                <circle id="homeLed" class="led" cx="20" cy="58" r="4"/><text class="sub" x="33" y="61">Home Sensor</text>
+              </g>
+              <g id="alarmTower" class="device" transform="translate(536 222)"><rect class="case" x="8" y="0" width="28" height="67" rx="8"/><circle cx="22" cy="14" r="8" fill="#40262c"/><circle cx="22" cy="33" r="8" fill="#403822"/><circle class="led" cx="22" cy="52" r="8"/><rect x="4" y="66" width="36" height="6" rx="2" fill="#385367"/><text class="sub" x="-1" y="84">Alarm Tower</text><circle id="alarmHalo" cx="22" cy="14" r="20"/></g>
+
+              <g id="station" transform="translate(0 0)">
+                <rect x="163" y="236" width="348" height="337" rx="12" fill="#0c2232" stroke="#24485f" stroke-width="2"/>
+                <text x="177" y="255" fill="#7598ad" font-size="8" font-weight="700">XYZ DISPENSING PLATFORM · 工件坐标系</text>
+                <path d="M185 284H485" stroke="#2b536b" stroke-width="8"/><path d="M201 274V296M469 274V296" stroke="#5b7b8d" stroke-width="7"/>
+                <text x="431" y="277" fill="#668ba1" font-size="7">X GANTRY</text>
+                <rect class="platform" x="196" y="306" width="283" height="222" rx="9"/>
+                <rect id="softLimit" x="208" y="318" width="259" height="198" rx="5"/>
+                <g id="clampGroup">
+                  <rect class="fixture" x="218" y="333" width="238" height="168" rx="10"/>
+                  <rect class="workpiece" x="232" y="345" width="210" height="144" rx="17"/>
+                  <text x="289" y="415" fill="#718b9a" font-size="9" font-weight="750">WORKPIECE</text>
+                  <text x="291" y="429" fill="#526f82" font-size="7">WP-DISP-001</text>
+                  <path class="clamp-jaw left-jaw" d="M211 370H234V396H211Z"/><path class="clamp-jaw right-jaw" d="M463 370H440V396H463Z"/>
+                  <path class="clamp-jaw left-jaw" d="M211 441H234V467H211Z"/><path class="clamp-jaw right-jaw" d="M463 441H440V467H463Z"/>
+                  <text x="205" y="322" fill="#668da5" font-size="7">CLAMP / FIXTURE</text>
+                </g>
+
+                <rect id="pathBounds" x="252" y="357" width="170" height="120" rx="17"/>
+                <path id="pathOriginal" d="M269 359H405Q421 359 421 375V459Q421 475 405 475H269Q253 475 253 459V375Q253 359 269 359Z"/>
+                <path id="pathPreview" d="M270 361H406Q422 361 422 377V457Q422 473 406 473H270Q254 473 254 457V377Q254 361 270 361Z"/>
+                <path id="gluePath" d="M270 361H406Q422 361 422 377V457Q422 473 406 473H270Q254 473 254 457V377Q254 361 270 361Z"/>
+                <circle cx="270" cy="361" r="4" fill="#36aef5"/><text x="262" y="351" fill="#7eb4d0" font-size="7">P0 START</text>
+                <text x="396" y="351" fill="#c49455" font-size="7">ARC R12</text>
+                <text x="309" y="488" fill="#63859a" font-size="7">LINE + ARC + LINE · CLOSED PATH</text>
+
+                <g id="nozzleTravel" transform="translate(337 304)">
+                  <g id="nozzleZ">
+                    <rect class="valve-body" x="-13" y="-39" width="26" height="35" rx="5"/>
+                    <text x="-25" y="-44" fill="#8db5c9" font-size="7">DISPENSE VALVE</text>
+                    <path class="needle" d="M-5 -4H5L2 11H-2Z"/>
+                    <circle id="glueDrop" cx="0" cy="14" r="4"/>
+                  </g>
+                </g>
+                <path d="M337 284V322" stroke="#3b6b84" stroke-width="7"/><text x="344" y="301" fill="#6f94a8" font-size="7">Z AXIS</text>
+                <g id="axisBadge" transform="translate(179 540)"><path d="M0 24V0M0 24H28M0 24L17 8" stroke-width="2" fill="none" stroke="#607f91"/><text x="-4" y="-4" fill="#ffad4d" font-size="7">Y</text><text x="31" y="27" fill="#36aef5" font-size="7">X</text><text x="19" y="7" fill="#49df91" font-size="7">Z</text></g>
+              </g>
+
+              <g id="ioBox" class="device" transform="translate(22 336)"><rect class="case" width="126" height="85" rx="6"/><text x="10" y="16">IO / Sensor Feedback</text><circle class="led io-led" cx="15" cy="32" r="3"/><text class="sub" x="24" y="35">WorkpieceDetected</text><circle class="led io-led" cx="15" cy="48" r="3"/><text class="sub" x="24" y="51">ClampLocked</text><circle class="led io-led" cx="15" cy="64" r="3"/><text class="sub" x="24" y="67">Home / Limit</text><circle class="led io-led" cx="15" cy="78" r="3"/><text class="sub" x="24" y="81">Valve Output</text></g>
+              <path id="ioBus" class="bus" d="M148 378H163"/>
+
+              <g transform="translate(22 456)">
+                <rect width="126" height="100" rx="6" fill="#0d2233" stroke="#294b60"/>
+                <text x="10" y="16" fill="#9fbdce" font-size="8" font-weight="750">现场状态 / LIVE</text>
+                <text x="10" y="35" fill="#66889e" font-size="7">Motion</text><text id="sceneMotion" x="54" y="35" fill="#3de5dc" font-size="7">Idle</text>
+                <text x="10" y="51" fill="#66889e" font-size="7">Valve</text><text id="sceneValve" x="54" y="51" fill="#ffad4d" font-size="7">ValveOff</text>
+                <text x="10" y="67" fill="#66889e" font-size="7">Segment</text><text id="sceneSegment" x="54" y="67" fill="#36aef5" font-size="7">0 / 8</text>
+                <text x="10" y="83" fill="#66889e" font-size="7">Result</text><text id="sceneResult" x="54" y="83" fill="#d8eaff" font-size="7">Unknown</text>
+              </g>
+
+              <g id="okNg" transform="translate(474 330)">
+                <rect width="107" height="78" rx="7" fill="#0d2233" stroke="#294b60"/>
+                <text x="10" y="15" fill="#91b3c5" font-size="8" font-weight="750">QUALITY GATE</text>
+                <rect id="okZone" x="10" y="25" width="39" height="38" rx="5" fill="#17372d" stroke="#2c6d50"/><text x="21" y="48" fill="#49df91" font-size="10" font-weight="900">OK</text>
+                <rect id="ngZone" x="58" y="25" width="39" height="38" rx="5" fill="#3b2d1d" stroke="#73542f"/><text x="68" y="48" fill="#ffad4d" font-size="10" font-weight="900">NG</text>
+              </g>
+            </svg>
+          </div>
+          <div class="scene-legend">
+            <span><i class="dot" style="background:var(--blue)"></i>运动命令 IPC → Card → Servo</span>
+            <span><i class="dot" style="background:var(--green)"></i>轴 / 传感器正常反馈</span>
+            <span><i class="dot" style="background:var(--orange)"></i>阀门与胶压工艺同步</span>
+            <span><i class="dot" style="background:var(--red)"></i>报警、停轴、关阀</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-head"><h2>上位机点胶轨迹插补调试视图</h2><span class="tag">SOFTWARE + MOTION DIAGNOSTICS</span></div>
+        <div class="panel-body tech-stack">
+          <section class="tech-card">
+            <div class="tech-card-head"><h3>当前路径配方</h3><span>DispenseRecipe</span></div>
+            <div class="tech-card-body recipe-grid">
+              <div class="datum accent"><small>recipeId</small><strong>RECIPE-SEAL-01</strong></div><div class="datum accent"><small>pathId</small><strong>PATH-RECT-R4-001</strong></div><div class="datum"><small>dispenseSpeed</small><strong>60 mm/s</strong></div>
+              <div class="datum"><small>cornerSpeed</small><strong>24 mm/s</strong></div><div class="datum"><small>zDispenseHeight</small><strong>2.20 mm</strong></div><div class="datum"><small>valvePreOpenDistance</small><strong>3.0 mm</strong></div>
+              <div class="datum"><small>valveCloseDelayDistance</small><strong>2.5 mm</strong></div><div class="datum"><small>pressureMin</small><strong>0.36 MPa</strong></div><div class="datum"><small>pressureMax</small><strong>0.48 MPa</strong></div>
+            </div>
+          </section>
+
+          <div class="dual">
+            <section class="tech-card">
+              <div class="tech-card-head"><h3>XY 轨迹预览 / 轨迹点表</h3><span>X 20–160 · Y 20–100</span></div>
+              <div class="tech-card-body">
+                <div class="path-preview">
+                  <svg id="debugPathSvg" viewBox="0 0 220 145">
+                    <path d="M20 20V128M55 20V128M90 20V128M125 20V128M160 20V128M195 20V128M10 32H210M10 62H210M10 92H210M10 122H210" class="debug-grid"/>
+                    <path id="debugRoute" d="M48 36H171Q187 36 187 52V105Q187 121 171 121H48Q32 121 32 105V52Q32 36 48 36Z"/>
+                    <path id="debugGlue" d="M48 36H171Q187 36 187 52V105Q187 121 171 121H48Q32 121 32 105V52Q32 36 48 36Z"/>
+                    <circle id="debugCursor" cx="48" cy="36" r="4"/>
+                    <text x="45" y="28" fill="#6f95ab" font-size="7">P0 (20,20)</text><text x="153" y="135" fill="#6f95ab" font-size="7">Arc R=12</text>
+                  </svg>
+                </div>
+                <div class="point-strip" aria-label="轨迹点表">
+                  <span><b>P0</b> Start 20,20</span><span><b>P1</b> Line 160,20</span><span><b>P2</b> Arc R12</span>
+                  <span><b>P3</b> Line 160,100</span><span><b>P4</b> Arc R12</span><span><b>P5</b> Line 20,100</span>
+                  <span><b>P6</b> Arc R12</span><span><b>P7</b> Line 20,20</span><span><b>P8</b> End</span>
+                </div>
+                <div class="checklist"><span id="checkSoft" class="check">SoftLimit</span><span id="checkZ" class="check">Z Height</span><span id="checkVel" class="check">Velocity</span><span id="checkCorner" class="check">R12</span></div>
+              </div>
+            </section>
+            <section class="tech-card">
+              <div class="tech-card-head"><h3>插补段列表</h3><span id="segmentCount">0 / 8</span></div>
+              <div class="tech-card-body segment-list" id="segmentList"></div>
+            </section>
+          </div>
+
+          <section class="tech-card">
+            <div class="tech-card-head"><h3>轴状态表</h3><span>Command ↔ Feedback</span></div>
+            <div class="tech-card-body">
+              <table>
+                <thead><tr><th style="width:6%">Axis</th><th>Current</th><th>Target</th><th>Velocity</th><th>Servo</th><th>Home</th><th>Done</th><th>Follow Err.</th><th>Limit</th><th>Alarm</th></tr></thead>
+                <tbody id="axisTable"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="tech-card">
+            <div class="tech-card-head"><h3>当前命令 / 点胶阀同步状态机</h3><span>CMD-INTERP-001</span></div>
+            <div class="tech-card-body">
+              <div class="command-card"><span id="currentCommand">NoCommand()</span><span id="commandState">IDLE</span></div>
+              <div class="valve-row" id="valveRow"></div>
+            </div>
+          </section>
+
+          <section class="tech-card">
+            <div class="tech-card-head"><h3>过程曲线</h3><span>DAQ · 20 ms sample</span></div>
+            <div class="tech-card-body curve-grid">
+              <div class="curve-box"><div class="curve-title"><span>胶压 / MPa</span><b id="pressureValue">0.42</b></div><svg viewBox="0 0 160 56"><path d="M0 12H160M0 44H160" class="threshold"/><polyline id="pressureCurve" class="curve" points="0,29 20,28 40,30 60,27 80,29 100,28 120,30 140,28 160,29"/></svg></div>
+              <div class="curve-box"><div class="curve-title"><span>跟随误差 / mm</span><b id="errorValue">0.006</b></div><svg viewBox="0 0 160 56"><path d="M0 10H160M0 46H160" class="threshold"/><polyline id="errorCurve" class="curve" points="0,31 20,28 40,32 60,26 80,29 100,27 120,31 140,29 160,30"/></svg></div>
+              <div class="curve-box"><div class="curve-title"><span>速度规划 / mm/s</span><b id="speedValue">0.0</b></div><svg viewBox="0 0 160 56"><path d="M0 48H160" class="threshold"/><polyline id="speedCurve" class="curve" points="0,48 20,48 40,48 60,48 80,48 100,48 120,48 140,48 160,48"/></svg></div>
+            </div>
+          </section>
+
+          <section class="tech-card">
+            <div class="tech-card-head"><h3>事件日志 / 追溯结果</h3><span id="traceLabel">TRACE-DISP-001</span></div>
+            <div class="tech-card-body">
+              <div id="logWindow" class="log-window" aria-live="polite"></div>
+              <div id="resultCard" class="result-card" style="margin-top:6px">
+                <span id="resultMark" class="result-mark">--</span><span class="result-copy"><small>Final Result · WP-DISP-001</small><strong id="resultTitle">Waiting for cycle</strong></span><span id="resultReason" style="color:#7898ab;font-size:7px">qualityResult = Unknown</span>
+              </div>
+            </div>
+          </section>
+        </div>
+      </article>
+
+      <article class="panel flow-panel">
+        <div class="panel-head"><h2>点胶轨迹插补业务闭环</h2><span class="tag">CLICK ANY NODE</span></div>
+        <div class="panel-body">
+          <div id="flowShell" class="flow-shell">
+            <span id="flowToken" title="PATH-RECT-R4-001"></span>
+            <div id="flowNodes"></div>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section class="panel detail-panel" id="detailPanel">
+      <div class="panel-head">
+        <div class="detail-title"><span id="detailIndex">01</span><div><h2 id="detailName">加载点胶配方</h2><small id="detailShort">Load Recipe</small></div></div>
+        <span class="tag">TECHNICAL DETAIL · INTERVIEW READY</span>
+      </div>
+      <div class="detail-grid">
+        <div class="detail-item"><h4>业务作用</h4><p id="detailPurpose"></p></div>
+        <div class="detail-item"><h4>输入</h4><p id="detailInput"></p></div>
+        <div class="detail-item"><h4>输出</h4><p id="detailOutput"></p></div>
+        <div class="detail-item"><h4>关键技术</h4><p id="detailTech"></p></div>
+        <div class="detail-item wide"><h4>常见异常 / 判断条件</h4><p id="detailAbnormal"></p></div>
+        <div class="detail-item wide"><h4>和前后节点的关系</h4><p id="detailRelation"></p></div>
+        <div class="detail-item english" style="grid-column:1/-1"><h4>Simple Technical English</h4><p id="detailEnglish"></p></div>
+      </div>
+    </section>
+    <div class="footer-note">Single-file industrial animation · HTML + CSS + JavaScript + SVG + GSAP · No backend</div>
+  </main>
+
+  <script>
+    const recipeData = {
+      workpieceId: "WP-DISP-001", recipeId: "RECIPE-SEAL-01", pathId: "PATH-RECT-R4-001",
+      motionCommandId: "CMD-INTERP-001", traceId: "TRACE-DISP-001", dispenseSpeed: 60,
+      cornerSpeed: 24, zDispenseHeight: 2.20, valvePreOpenDistance: 3.0,
+      valveCloseDelayDistance: 2.5, pressureMin: 0.36, pressureMax: 0.48
+    };
+
+    const flowNodes = [
+      {id:"load-recipe",title:"加载点胶配方",shortLabel:"Load Recipe",purpose:"根据产品型号加载轨迹、速度、点胶高度、阀门提前打开距离和压力上下限。",input:"productModel、recipeId、pathId、点位表、速度/阀门/压力参数。",output:"DispenseRecipe Loaded；获得可执行工艺参数。",tech:["配方管理","点位表","参数校验","版本管理","路径数据结构"],abnormal:["配方不存在","点位缺失","速度非法","Z 高度越界","压力上下限错误"],relation:"业务起点。没有配方，运动模块既不知道路径，也不知道何时开阀。",english:"This step loads the dispensing recipe before generating any motion path.",kind:"normal"},
+      {id:"safety-check",title:"设备安全检查",shortLabel:"Safety Check",purpose:"检查急停、门禁、限位、伺服报警、气压、胶压与夹具状态。",input:"EmergencyStop、DoorClosed、LimitStatus、ServoAlarm、AirPressure、GluePressure、ClampStatus。",output:"SafetyCheckPassed 或 SafetyCheckFailed。",tech:["安全互锁","DI 读取","报警聚合","启动条件判断"],abnormal:["急停未释放","安全门打开","限位触发","伺服报警","气压或胶压异常"],relation:"位于配方加载之后、任何轴运动之前；不满足安全条件就禁止运动。",english:"The software checks safety conditions before allowing the motion system to move.",kind:"normal"},
+      {id:"servo-home",title:"伺服使能与回原点",shortLabel:"Servo On & Home",purpose:"使能 X/Y/Z 伺服轴，并通过 Home Sensor 建立可信机械坐标。",input:"AxisNo、ServoOnCommand、HomeMode、HomeSensor、LimitSignal、HomeSpeed。",output:"ServoOn = true，HomeDone = true。",tech:["伺服使能","回原点","坐标清零","超时与限位保护"],abnormal:["伺服报警","回零方向错误","找不到原点","回零超时","撞限位"],relation:"绝对轨迹依赖可信坐标；没有 Home Done 就不能执行配方坐标。",english:"Homing makes the path coordinates reliable for real machine movement.",kind:"normal"},
+      {id:"clamp",title:"工件到位与夹紧",shortLabel:"Clamp Workpiece",purpose:"确认工件进入治具并夹紧，防止点胶时发生位移。",input:"WorkpieceSensor、ClampOutput、ClampLockedSensor、workpieceId。",output:"WorkpieceReady，ClampLocked = true。",tech:["IO 控制","气缸夹紧","传感器反馈","动作超时","ID 绑定"],abnormal:["工件不到位","传感器误触发","夹具不到位","气压不足","夹具卡滞"],relation:"工件固定后轨迹才有意义，否则胶线会偏移或断线。",english:"The part must be clamped before the dispensing path starts.",kind:"normal"},
+      {id:"read-path",title:"读取点胶路径",shortLabel:"Build Path Segments",purpose:"把配方点位转换成运动控制器可识别的直线段与圆弧段。",input:"PathPoints、LineSegment、ArcSegment、StartPoint、EndPoint、CornerRadius。",output:"包含起终点、方向、直线和圆弧的 PathSegments。",tech:["路径数据结构","直线段","圆弧段","路径排序","闭合检查"],abnormal:["点顺序错误","路径不闭合","圆弧半径非法","起终点不一致"],relation:"把业务图纸或配方路径翻译成控制卡可执行的段队列。",english:"This step converts the recipe path into executable line and arc segments.",kind:"normal"},
+      {id:"compensate",title:"视觉 / 治具坐标补偿",shortLabel:"Coordinate Compensation",purpose:"依据相机定位或治具偏移，对整条轨迹做 X/Y/角度补偿。",input:"VisionOffset、FixtureOffset、OriginalPath、CalibrationMatrix。",output:"补偿后的 CompensatedPath。",tech:["坐标转换","手眼标定","平移补偿","旋转补偿"],abnormal:["视觉定位失败","补偿量过大","标定错误","补偿后越界"],relation:"位于读取路径之后、合法性检查之前；实际执行的是补偿后路径。",english:"This step adjusts the dispensing path based on the real part position.",kind:"normal"},
+      {id:"validate",title:"轨迹合法性检查",shortLabel:"Validate Path",purpose:"检查补偿路径是否落在 XYZ 软限位、速度、加速度与安全高度范围。",input:"CompensatedPath、SoftLimit、VelocityLimit、AccelerationLimit、ZHeight。",output:"PathValid 或 PathInvalid。",tech:["软限位","路径包围盒","速度限制","Z 高度检查","禁区判断"],abnormal:["路径越界","Z 高度过低","速度超限","圆角不合理","穿越禁区"],relation:"正式插补前的保护闸；路径不合法必须转报警分支。",english:"The software validates the path before sending it to the motion controller.",kind:"normal"},
+      {id:"move-start",title:"移动到轨迹起点上方",shortLabel:"Move To Start",purpose:"XY 移到点胶起点上方，同时 Z 轴维持安全高度。",input:"StartPoint、SafeZHeight、CurrentPosition、MoveSpeed。",output:"NozzleAboveStartPoint。",tech:["点位运动","安全 Z","软限位","运动完成判断"],abnormal:["起点越界","运动超时","未到位","限位触发","伺服报警"],relation:"插补前的准备动作；先到起点上方，再下降和开阀。",english:"The nozzle moves above the start point before lowering to the dispensing height.",kind:"normal"},
+      {id:"z-down",title:"Z 轴下降到点胶高度",shortLabel:"Z To Dispense Height",purpose:"将针头降到指定工艺高度，建立稳定的针头—工件间距。",input:"ZDispenseHeight、CurrentZ、ZSpeed、HeightTolerance。",output:"ZInDispenseHeight。",tech:["Z 轴绝对运动","高度控制","到位确认","防撞保护"],abnormal:["高度越界","针头过低","运动超时","Z 轴报警","工件高度异常"],relation:"开阀前必须到位；高度不对会引起粗胶、断胶、刮伤或撞针。",english:"The Z axis moves to the correct dispensing height before the valve opens.",kind:"normal"},
+      {id:"pre-open",title:"点胶阀预开启",shortLabel:"Valve Pre-open",purpose:"在路径开始前提前开阀，补偿胶路响应延迟，避免起点缺胶。",input:"ValvePreOpenDistance、ValveDelayTime、DispensePressure、StartPoint。",output:"ValvePreOpen，胶水准备流出。",tech:["阀门 IO","提前开阀","响应延迟补偿","位置/时间同步"],abnormal:["阀门无响应","开阀延迟","起点堆胶","起点缺胶","胶压不足"],relation:"连接 Z 下降和正式插补；开阀时机直接决定胶线起点质量。",english:"The valve opens slightly before the path starts to compensate for glue delay.",kind:"normal"},
+      {id:"interpolate",title:"执行 XY 轨迹插补",shortLabel:"XY Interpolation",purpose:"控制卡令 X/Y 按多段路径连续运动，而不是逐点停顿。",input:"PathSegments、DispenseSpeed、Acceleration、InterpolationMode、BlendMode。",output:"XY Interpolation Running，针头连续成胶。",tech:["直线插补","圆弧插补","段缓存","连续运动","速度规划","LookAhead"],abnormal:["缓存不足","段连接不连续","运动超时","跟随误差","通信中断"],relation:"核心节点：把配方几何变成真实、多轴同步、连续的运动。",english:"The controller interpolates the XY axes so the nozzle follows a continuous dispensing path.",kind:"normal"},
+      {id:"corner",title:"拐角降速与圆弧过渡",shortLabel:"Corner Blending",purpose:"在圆角区域降低速度并连续过渡，避免过冲、抖动与胶线变形。",input:"CornerRadius、CornerSpeed、Acceleration、Jerk、BlendTolerance。",output:"SmoothCornerMotion。",tech:["圆弧插补","拐角限速","S 曲线","LookAhead","路径平滑"],abnormal:["拐角过冲","机械抖动","胶线堆积","轨迹偏差","速度突变"],relation:"直线可以快，拐角必须考虑机械惯性、曲率和胶量稳定。",english:"The system slows down and blends corners to keep the glue line stable.",kind:"normal"},
+      {id:"monitor",title:"压力与跟随误差监控",shortLabel:"Process Monitoring",purpose:"点胶中实时监控胶压与轴跟随误差，判断运动和出胶是否稳定。",input:"GluePressure、FlowSensor、FollowingError、FeedbackPosition、CommandPosition。",output:"ProcessStable 或 ProcessAlarm。",tech:["数据采集","上下限","跟随误差","实时轮询","报警阈值"],abnormal:["低压/高压","断胶","堵针","跟随误差过大","伺服报警"],relation:"与插补并行发生；路径走完不等于过程质量稳定。",english:"The software monitors pressure and following error while the path is running.",kind:"normal"},
+      {id:"path-done",title:"轨迹完成判断",shortLabel:"Path Complete?",purpose:"确认所有段执行完成，且反馈位置进入到位窗口。",input:"SegmentDone、MotionDone、CommandPosition、FeedbackPosition、PositionTolerance。",output:"PathCompleted = true。",tech:["段队列状态","反馈位置","到位窗口","完成超时"],abnormal:["段未执行完","末端误差大","Done 信号异常","到位超时"],relation:"关阀前必须确认实际运动结束，不能只看命令是否发送完。",english:"The software confirms the full path is completed before closing the process.",kind:"normal"},
+      {id:"close-delay",title:"点胶阀延迟关闭",shortLabel:"Valve Close Delay",purpose:"在终点外延一点或短暂延时后关阀，补偿胶路迟滞。",input:"ValveCloseDelayDistance、ValveDelayTime、EndPoint、DispenseState。",output:"ValveOff，胶线收尾完成。",tech:["延迟关阀","收尾补偿","IO 同步","响应时间","路径延长"],abnormal:["末端缺胶","末端堆胶","关阀失败","滴胶","拉丝"],relation:"轨迹完成之后、Z 抬起之前；关阀时机决定胶线末端质量。",english:"The valve closes after a small delay to improve the end of the glue line.",kind:"normal"},
+      {id:"z-up",title:"Z 轴抬起到安全高度",shortLabel:"Z Safe Up",purpose:"关阀后抬 Z，避免针头刮到工件或刚形成的胶线。",input:"SafeZHeight、CurrentZ、ZSpeed、ValveOffState。",output:"ZSafe。",tech:["Z 点位运动","防撞","动作顺序","运动完成判断"],abnormal:["Z 未抬起","拖胶","刮伤工件","Z 报警","超时"],relation:"必须先关阀再抬 Z，否则可能拉丝、滴胶或刮胶。",english:"The Z axis lifts up after dispensing to avoid touching the part or glue line.",kind:"normal"},
+      {id:"judge",title:"胶线结果判定",shortLabel:"Judge Quality",purpose:"综合轨迹完成、压力曲线、跟随误差与可选视觉检测生成质量结果。",input:"PathCompleted、PressureCurve、FollowingErrorCurve、ValveState、OptionalVisionCheck。",output:"qualityResult = OK 或 NG。",tech:["过程数据判定","阈值","质量检测","异常聚合","结果生成"],abnormal:["断胶","堆胶","轨迹偏差","压力异常","数据缺失"],relation:"将运动过程与工艺质量联系起来，而不是只看机器是否动完。",english:"This step judges whether the dispensing process produced a good glue line.",kind:"normal"},
+      {id:"save-ok",title:"记录 OK 结果并上传 MES",shortLabel:"Save OK & MES",purpose:"保存轨迹、压力、运动状态和生产追溯数据，并上传 MES。",input:"workpieceId、traceId、recipeId、pathId、qualityResult、pressureCurve、motionLog。",output:"SQL Record、MES Upload OK、Traceability Data。",tech:["SQL 入库","MES 接口","生产追溯","过程数据绑定","日志"],abnormal:["数据库失败","MES 上传失败","traceId 缺失","曲线缺失"],relation:"把一次物理动作转化成可查询、可追溯的生产记录。",english:"The system saves the dispensing result and process data for traceability.",kind:"ok"},
+      {id:"save-ng",title:"记录 NG 结果并报警提示",shortLabel:"Save NG & Notify",purpose:"记录 NG 原因，并引导操作员检查胶压、针头、轨迹或工件。",input:"NGReason、AlarmCode、pressureState、followingError、workpieceId。",output:"NG Record、Alarm Message、Operator Notice。",tech:["NG 分类","报警记录","原因聚合","人工提示","追溯"],abnormal:["NG 原因不明","报警码缺失","重复报警","人工未处理"],relation:"质量异常分支，用于快速区分运动、出胶或工件问题。",english:"For NG parts, the system records the reason and guides the operator to check the process.",kind:"ng"},
+      {id:"ready",title:"回到 Ready",shortLabel:"Return Ready",purpose:"结束本次循环，设备回安全待机状态，等待下一件产品。",input:"CycleCompleted、ClampStatus、AxisStatus、AlarmStatus、ReadyPosition。",output:"Ready，允许下一循环。",tech:["状态机复位","循环控制","轴安全位","节拍管理"],abnormal:["轴不在安全位","夹具未松开","报警未清除","工件未取走"],relation:"本轮闭环终点，也是下一轮生产起点。",english:"The machine returns to Ready state for the next dispensing cycle.",kind:"ok"},
+      {id:"alarm-stop",title:"报警停机",shortLabel:"Alarm Stop",purpose:"路径越界、压力/跟随误差、伺服或限位异常时停止流程并保护设备。",input:"PathInvalid、PressureAlarm、FollowingErrorAlarm、ServoAlarm、LimitTriggered、EmergencyStop。",output:"StopAllAxes、ValveOff、AlarmState、AlarmLog。",tech:["减速/立即停止","关阀保护","报警码","安全互锁"],abnormal:["轴停在路径中间","阀未关闭","胶水继续流出","坐标不可信"],relation:"安全分支：一旦过程不再安全，插补、阀门和轴必须按顺序进入保护状态。",english:"The alarm branch stops the axes and closes the valve when the dispensing process becomes unsafe.",kind:"alarm"},
+      {id:"manual-reset",title:"人工处理与复位",shortLabel:"Operator Reset",purpose:"操作员排除故障、确认安全后复位报警，并按需要重新回原点。",input:"OperatorConfirm、AlarmReset、ServoReset、ValveCheck、AxisPosition、MachineSafeState。",output:"AlarmCleared，返回 Homing 或 Ready。",tech:["报警复位","人工确认","安全恢复","重新回零","状态机恢复"],abnormal:["故障未解除","再次报警","堵针未处理","轴位置不可信"],relation:"连接异常与正常生产；复位后通常不能直接续跑，必须重建安全坐标。",english:"After maintenance, the operator resets the alarm and rebuilds a safe motion state.",kind:"alarm"}
+    ];
+
+    const animationSteps = [
+      {node:"load-recipe",desc:"加载产品型号、点胶速度、Z 高度、阀门补偿和胶压窗口。",motion:"Initializing",valve:"ValveOff",command:"LoadRecipe(RECIPE-SEAL-01)",log:"Load dispensing recipe RECIPE-SEAL-01."},
+      {node:"safety-check",desc:"聚合急停、门禁、限位、气压、胶压与夹具启动条件。",motion:"Initializing",valve:"ValveOff",command:"CheckSafetyInterlocks()",log:"Safety check passed."},
+      {node:"servo-home",desc:"运动卡下发三轴 ServoOn 与 Homing；原点反馈让机械坐标可信。",motion:"Homing",valve:"ValveOff",command:"ServoOn(); Home(X,Y,Z)",log:"Servo on. Homing X/Y/Z done."},
+      {node:"clamp",desc:"绑定 workpieceId，检测工件到位，并等待夹具锁紧反馈。",motion:"Ready",valve:"ValveOff",command:"ClampOn(); Wait(ClampLocked)",log:"Workpiece clamped."},
+      {node:"read-path",desc:"将 P0–P8 变成 4 条直线与 4 个 R12 圆弧插补段。",motion:"PathLoaded",valve:"ValveOff",command:"BuildPathSegments(PATH-RECT-R4-001)",log:"Path segments generated."},
+      {node:"compensate",desc:"相机提供 OffsetX +0.18 mm、OffsetY -0.12 mm、Angle +0.3°，整条路径随工件修正。",motion:"Compensating",valve:"ValveOff",command:"ApplyTransform(+0.18,-0.12,+0.3°)",log:"Path compensation applied."},
+      {node:"validate",desc:"用路径包围盒验证软限位、Z 高度、速度与拐角半径。",motion:"PathLoaded",valve:"ValveOff",command:"ValidatePath(SoftLimit, Z, V, R)",log:"Path validation passed."},
+      {node:"move-start",desc:"XY 先移动到 P0 上方；Z 保持 Safe，避免横移撞针。",motion:"MovingToStart",valve:"ValveOff",command:"MoveToStart(X=20,Y=20,Z=Safe)",log:"Move nozzle above start point."},
+      {node:"z-down",desc:"Z 轴下降到 2.20 mm 点胶高度，并在到位窗口内确认。",motion:"MovingToStart",valve:"ValveOff",command:"MoveAbs(Z=2.20mm)",log:"Z axis moved to dispensing height."},
+      {node:"pre-open",desc:"阀门在路径开始前预开 3.0 mm，补偿胶路响应延迟。",motion:"Dispensing",valve:"ValvePreOpen",command:"ValveOn(PRE_OPEN=3.0mm)",log:"Valve pre-open to compensate glue delay."},
+      {node:"interpolate",desc:"运动卡缓存全部段并启动 XY 连续插补；针头运动、胶线与轴反馈同步更新。",motion:"Dispensing",valve:"ValveOn",command:"StartInterpolation(PATH-RECT-R4-001)",log:"Start XY interpolation."},
+      {node:"corner",desc:"在圆角区从 60 降到 24 mm/s，以圆弧和 S 曲线消除急停、过冲和堆胶。",motion:"Dispensing",valve:"ValveOn",command:"BlendCorner(R=12,V=24,Jerk=S)",log:"Corner speed and arc interpolation applied."},
+      {node:"monitor",desc:"20 ms 周期采集压力与跟随误差；正常反馈沿 Motion Card 返回 IPC。",motion:"Dispensing",valve:"ValveOn",command:"Monitor(Pressure, FollowingError)",log:"Pressure and following error are stable."},
+      {node:"path-done",desc:"段队列清空且反馈位置进入容差窗口，才能确认 PathCompleted。",motion:"InPosition",valve:"ValveOn",command:"Wait(PathCompleted && InPosition)",log:"Full path completed."},
+      {node:"close-delay",desc:"终点外延 2.5 mm 后关阀，使胶线闭合且末端不缺胶。",motion:"Completed",valve:"ValveCloseDelay",command:"ValveCloseDelay(2.5mm); ValveOff()",log:"Valve close delay applied."},
+      {node:"z-up",desc:"确认 ValveOff 后 Z 轴抬到安全高度，避免拉丝和刮胶。",motion:"Completed",valve:"ValveOff",command:"MoveAbs(Z=SafeHeight)",log:"Z axis lifted to safe height."},
+      {node:"judge",desc:"组合轨迹完成、胶压、跟随误差与胶线检查，生成 OK 或 NG。",motion:"Completed",valve:"ValveOff",command:"JudgeDispenseQuality()",log:"Dispensing result generated."},
+      {node:"branch",desc:"将结果、过程曲线、配方与 traceId 绑定；OK 上传 MES，NG 记录原因并提示。",motion:"Completed",valve:"ValveOff",command:"SaveTraceAndNotify()",log:"Result saved with traceability data."},
+      {node:"ready",desc:"本次闭环完成，轴回待机位，系统等待下一件工件。",motion:"Ready",valve:"ValveOff",command:"ReturnReady()",log:"Cycle completed. Waiting for next part."}
+    ];
+
+    const segmentTypes = ["Linear Interpolation","Circular Arc R12","Linear Interpolation","Circular Arc R12","Linear Interpolation","Circular Arc R12","Linear Interpolation","Circular Arc R12"];
+    const valveStates = ["ValveOff","ValvePreOpen","ValveOn","ValveCloseDelay","ValveOff"];
+    const state = {
+      stepIndex: -1, motionState: "Idle", dispenseState: "ValveOff", pressureState: "Normal",
+      qualityResult: "Unknown", segmentIndex: 0, desiredResult: "OK", alarmSource: null,
+      currentNode: "load-recipe", selectedNode: "load-recipe", axisProgress: 0, playing: false
+    };
+
+    let masterTimeline, pathTween, curveTimer, stepTimes = [];
+    const $ = id => document.getElementById(id);
+
+    // 渲染完整业务闭环，节点点击仅切换知识详情，不打断动画状态机。
+    function renderFlowNodes() {
+      const host = $("flowNodes");
+      host.innerHTML = "";
+      flowNodes.forEach((node, index) => {
+        if (index === 0 || index === 17 || index === 20) {
+          const label = document.createElement("div");
+          label.className = "flow-section-label";
+          label.textContent = index === 0 ? "NORMAL SEQUENCE" : index === 17 ? "QUALITY BRANCH" : "ALARM & RECOVERY BRANCH";
+          host.appendChild(label);
+        }
+        const btn = document.createElement("button");
+        btn.className = `flow-node ${node.kind}`;
+        btn.id = `flow-${node.id}`;
+        btn.innerHTML = `<span class="flow-index">${String(index + 1).padStart(2,"0")}</span><span class="flow-copy"><strong>${node.title}</strong><small>${node.shortLabel}</small></span><span class="flow-kind">${node.kind.toUpperCase()}</span>`;
+        btn.addEventListener("click", () => selectNode(node.id));
+        host.appendChild(btn);
+      });
+    }
+
+    // 更新右侧节点对应的具体工程细节。
+    function selectNode(nodeId) {
+      const index = flowNodes.findIndex(n => n.id === nodeId);
+      if (index < 0) return;
+      state.selectedNode = nodeId;
+      const node = flowNodes[index];
+      document.querySelectorAll(".flow-node").forEach(el => el.classList.remove("selected"));
+      $(`flow-${nodeId}`).classList.add("selected");
+      $("detailIndex").textContent = String(index + 1).padStart(2,"0");
+      $("detailName").textContent = node.title;
+      $("detailShort").textContent = node.shortLabel;
+      $("detailPurpose").textContent = node.purpose;
+      $("detailInput").textContent = node.input;
+      $("detailOutput").textContent = node.output;
+      $("detailTech").textContent = node.tech.join(" · ");
+      $("detailAbnormal").textContent = node.abnormal.join("；");
+      $("detailRelation").textContent = node.relation;
+      $("detailEnglish").textContent = node.english;
+    }
+
+    function highlightCurrentNode(nodeId) {
+      state.currentNode = nodeId;
+      document.querySelectorAll(".flow-node").forEach(el => el.classList.remove("current"));
+      const node = $(`flow-${nodeId}`);
+      if (!node) return;
+      node.classList.add("current");
+      const shell = $("flowShell");
+      const top = node.offsetTop + node.offsetHeight / 2 - 7;
+      $("flowToken").style.top = `${top}px`;
+      const kind = flowNodes.find(n => n.id === nodeId)?.kind;
+      $("flowToken").style.background = kind === "alarm" ? "var(--red)" : kind === "ng" ? "var(--orange)" : kind === "ok" ? "var(--green)" : "var(--blue)";
+      if (node.offsetTop < shell.scrollTop + 30 || node.offsetTop + node.offsetHeight > shell.scrollTop + shell.clientHeight - 30) {
+        shell.scrollTo({top: Math.max(0, node.offsetTop - shell.clientHeight / 2), behavior:"smooth"});
+      }
+    }
+
+    function resetTransientScene() {
+      document.querySelectorAll(".device").forEach(el => el.classList.remove("active","alarm"));
+      document.querySelectorAll(".bus").forEach(el => el.classList.remove("active","feedback","alarm"));
+      $("sceneWrap").classList.remove("alarm-flash");
+      $("cameraFlash").style.opacity = 0;
+    }
+
+    // 推进一个关键业务节点，并同步现场、调试视图、流程图、日志和状态卡。
+    function updateStep(stepIndex, options = {}) {
+      if (stepIndex < 0 || stepIndex >= animationSteps.length) return;
+      const step = animationSteps[stepIndex];
+      state.stepIndex = stepIndex;
+      state.motionState = step.motion;
+      state.dispenseState = step.valve;
+      state.pressureState = "Normal";
+      if (stepIndex < 16) state.qualityResult = "Unknown";
+      if (stepIndex === 16) state.qualityResult = state.desiredResult;
+      state.alarmSource = null;
+      const nodeId = step.node === "branch" ? (state.desiredResult === "OK" ? "save-ok" : "save-ng") : step.node;
+      highlightCurrentNode(nodeId);
+      selectNode(nodeId);
+      resetTransientScene();
+      applySceneForStep(stepIndex);
+      updateChecklist(stepIndex);
+      updateStatusCards();
+      updateAxisTable();
+      updateSegmentList();
+      updateValveState();
+      updateCurves();
+      updateResultCard();
+      $("stepNumber").textContent = `STEP ${String(stepIndex + 1).padStart(2,"0")} / ${animationSteps.length}`;
+      $("stepDescription").textContent = step.desc;
+      $("currentCommand").textContent = step.command;
+      $("commandState").textContent = state.motionState.toUpperCase();
+      if (!options.silentLog) appendLog(step.log, stepIndex === 17 && state.desiredResult === "NG" ? "warn" : "ok");
+    }
+
+    function applySceneForStep(i) {
+      $("hmiState").textContent = `State: ${state.motionState}`;
+      if (i >= 0) { $("ipc").classList.add("active"); $("hmiRecipe").textContent = `Recipe: ${recipeData.recipeId}`; }
+      if (i >= 1) { ["estopLed","doorLed"].forEach(id => $(id).classList.add("on")); $("safety").classList.add("active"); }
+      if (i >= 2) {
+        ["servoX","servoY","servoZ","motionCard"].forEach(id => $(id).classList.add("active"));
+        $("homeLed").classList.add("on"); $("cmdBus").classList.add("active"); $("servoBus").classList.add("active"); $("feedbackBus").classList.add("feedback");
+      }
+      if (i >= 3) { $("clampGroup").classList.add("clamped"); document.querySelectorAll(".io-led").forEach(el => el.classList.add("on")); $("ioBox").classList.add("active"); }
+      if (i >= 4) $("pathPreview").style.opacity = .8;
+      if (i === 5) {
+        $("camera").classList.add("active"); $("pathOriginal").style.opacity = .8;
+        gsap.fromTo("#cameraFlash", {opacity:0}, {opacity:.9, duration:.14, repeat:3, yoyo:true});
+        gsap.fromTo("#pathPreview", {x:-6,y:3,rotation:-.3,transformOrigin:"center"}, {x:0,y:0,rotation:0,duration:.8,ease:"power2.out"});
+      }
+      if (i >= 6) { $("pathBounds").style.opacity = 1; $("softLimit").style.opacity = 1; document.querySelectorAll(".check").forEach(el => el.classList.add("pass")); }
+      if (i === 7) animateMoveToStart();
+      if (i >= 8 && i <= 14) $("nozzleZ").classList.add("down");
+      if (i === 8) $("servoZ").classList.add("active");
+      if (i >= 9 && i <= 14) { $("nozzleZ").classList.add("valve-on"); $("glueDrop").style.opacity = 1; $("pressureBus").classList.add("process"); }
+      if (i === 9) gsap.fromTo("#glueDrop", {scale:.35}, {scale:1.2,duration:.35,repeat:3,yoyo:true,transformOrigin:"center"});
+      if (i === 10) startInterpolationAnimation();
+      if (i === 11) { $("speedValue").textContent = "24.0"; }
+      if (i === 12) { $("pressureSensor").classList.add("active"); $("sensorFeedback").classList.add("feedback"); }
+      if (i === 13) finishInterpolation();
+      if (i === 14) { $("glueDrop").style.opacity = 0; setTimeout(() => { if (state.stepIndex === 14) $("nozzleZ").classList.remove("valve-on"); }, 650); }
+      if (i >= 15) { $("nozzleZ").classList.remove("down","valve-on"); $("glueDrop").style.opacity = 0; }
+      if (i >= 16) $("gluePath").style.stroke = state.desiredResult === "OK" ? "var(--green)" : "var(--orange)";
+      if (i === 17) {
+        if (state.desiredResult === "OK") { $("mesBus").classList.add("feedback"); $("mes").classList.add("active"); gsap.fromTo("#okZone", {scale:1}, {scale:1.12,duration:.25,repeat:3,yoyo:true,transformOrigin:"center"}); }
+        else { $("alarmTower").classList.add("active"); gsap.fromTo("#ngZone", {scale:1}, {scale:1.12,duration:.25,repeat:3,yoyo:true,transformOrigin:"center"}); }
+      }
+      if (i === 18) { $("safety").classList.add("active"); $("pathBounds").style.opacity = 0; $("softLimit").style.opacity = 0; }
+    }
+
+    function animateMoveToStart() {
+      pathTween?.kill();
+      const proxy = {x:337,y:304};
+      gsap.to(proxy, {x:270,y:361,duration:.8,ease:"power2.inOut",onUpdate:()=>$("nozzleTravel").setAttribute("transform",`translate(${proxy.x} ${proxy.y})`)});
+      gsap.fromTo("#nozzleTravel", {opacity:.5}, {opacity:1,duration:.8});
+    }
+
+    function preparePaths() {
+      ["gluePath","debugGlue"].forEach(id => {
+        const p = $(id), len = p.getTotalLength();
+        p.style.strokeDasharray = len;
+        p.style.strokeDashoffset = len;
+      });
+    }
+
+    function startInterpolationAnimation() {
+      pathTween?.kill();
+      const path = $("gluePath"), debugPath = $("debugGlue"), len = path.getTotalLength(), debugLen = debugPath.getTotalLength();
+      const proxy = {progress: Math.max(0, state.axisProgress || 0)};
+      path.style.strokeDashoffset = len * (1 - proxy.progress);
+      debugPath.style.strokeDashoffset = debugLen * (1 - proxy.progress);
+      pathTween = gsap.to(proxy, {
+        progress:1, duration:9.2, ease:"none",
+        onUpdate:() => {
+          state.axisProgress = proxy.progress;
+          path.style.strokeDashoffset = len * (1 - proxy.progress);
+          debugPath.style.strokeDashoffset = debugLen * (1 - proxy.progress);
+          const point = path.getPointAtLength(len * proxy.progress);
+          const dPoint = debugPath.getPointAtLength(debugLen * proxy.progress);
+          $("nozzleTravel").setAttribute("transform", `translate(${point.x} ${point.y})`);
+          $("debugCursor").setAttribute("cx", dPoint.x); $("debugCursor").setAttribute("cy", dPoint.y);
+          state.segmentIndex = Math.min(8, Math.floor(proxy.progress * 8) + 1);
+          updateAxisTable(); updateSegmentList(); updateStatusCards();
+        },
+        onComplete:finishInterpolation
+      });
+    }
+
+    function finishInterpolation() {
+      pathTween?.kill(); state.axisProgress = 1; state.segmentIndex = 8;
+      ["gluePath","debugGlue"].forEach(id => $(id).style.strokeDashoffset = 0);
+      const path = $("gluePath"), pt = path.getPointAtLength(path.getTotalLength());
+      $("nozzleTravel").setAttribute("transform", `translate(${pt.x} ${pt.y})`);
+      updateAxisTable(); updateSegmentList(); updateStatusCards();
+    }
+
+    function updateStatusCards() {
+      $("stMotion").textContent = state.motionState; $("stValve").textContent = state.dispenseState;
+      $("stPressure").textContent = state.pressureState; $("stResult").textContent = state.qualityResult; $("stSegment").textContent = state.segmentIndex;
+      $("sceneMotion").textContent = state.motionState; $("sceneValve").textContent = state.dispenseState;
+      $("sceneSegment").textContent = `${state.segmentIndex} / 8`; $("sceneResult").textContent = state.qualityResult;
+      const chip = $("resultStatusChip"); chip.className = "status-chip";
+      if (state.qualityResult === "OK") chip.classList.add("ok"); else if (state.qualityResult === "NG") chip.classList.add("ng"); else if (state.qualityResult === "Alarm") chip.classList.add("alarm");
+    }
+
+    // 用轨迹进度计算简化的 X/Y 指令位置、速度与跟随误差。
+    function updateAxisTable() {
+      const p = state.axisProgress;
+      const phase = p * 4;
+      let x = 20, y = 20;
+      if (phase < 1) x = 20 + 140 * phase;
+      else if (phase < 2) { x = 160; y = 20 + 80 * (phase - 1); }
+      else if (phase < 3) { x = 160 - 140 * (phase - 2); y = 100; }
+      else { x = 20; y = 100 - 80 * (phase - 3); }
+      const moving = state.motionState === "Dispensing";
+      const alarmError = state.alarmSource === "following";
+      const speed = moving ? (state.stepIndex === 11 ? 24 : 60) : 0;
+      const z = state.stepIndex >= 8 && state.stepIndex <= 14 ? 2.20 : 18.00;
+      const home = state.stepIndex >= 2 ? "DONE" : "--";
+      const servo = state.stepIndex >= 2 ? "ON" : "OFF";
+      const done = state.stepIndex >= 13 ? "TRUE" : moving ? "FALSE" : "--";
+      const err = alarmError ? 0.286 : moving ? 0.006 + Math.abs(Math.sin(p * 18)) * .004 : .002;
+      const rows = [
+        ["X",x,x,speed,err],["Y",y,y,speed * .72,err * .8],["Z",z,z,0,err * .35]
+      ];
+      $("axisTable").innerHTML = rows.map((r,idx) => `<tr><td>${r[0]}</td><td>${r[1].toFixed(2)}</td><td>${r[2].toFixed(2)}</td><td>${r[3].toFixed(1)}</td><td class="${servo==='ON'?'good':''}">${servo}</td><td class="${home==='DONE'?'good':''}">${home}</td><td>${done}</td><td class="${alarmError && idx===0?'bad':''}">${r[4].toFixed(3)}</td><td class="good">OK</td><td class="${state.motionState==='Alarm'?'bad':'good'}">${state.motionState==='Alarm'?'ALM':'0'}</td></tr>`).join("");
+    }
+
+    function updateSegmentList() {
+      $("segmentList").innerHTML = segmentTypes.map((type,index) => {
+        const n = index + 1;
+        const cls = n === state.segmentIndex ? "active" : n < state.segmentIndex ? "done" : "";
+        return `<div class="segment ${cls}"><b>SEG ${n}</b>${type}</div>`;
+      }).join("");
+      $("segmentCount").textContent = `${state.segmentIndex} / 8`;
+    }
+
+    function updateValveState() {
+      $("valveRow").innerHTML = valveStates.map((v,index) => {
+        const active = (state.dispenseState === v && !(v === "ValveOff" && index === 4 && state.stepIndex < 14)) || (v === "ValveOff" && index === 0 && state.dispenseState === v && state.stepIndex < 14);
+        return `<span class="valve-state ${active?'active':''}">${v}${index===0?' · START':index===4?' · END':''}</span>`;
+      }).join("");
+    }
+
+    function updateChecklist(stepIndex) {
+      const checks = [$("checkSoft"),$("checkZ"),$("checkVel"),$("checkCorner")];
+      checks.forEach(el => el.classList.remove("pass"));
+      const labels = stepIndex === 1 ? ["E-STOP","Door","Limit","Glue P"] : ["SoftLimit","Z Height","Velocity","R12"];
+      checks.forEach((el,index) => { el.textContent = labels[index]; });
+      if (stepIndex === 1 || stepIndex >= 6) checks.forEach(el => el.classList.add("pass"));
+    }
+
+    // 更新胶压、跟随误差和速度规划曲线；报警时越过阈值线。
+    function updateCurves() {
+      const normalPressure = "0,29 20,27 40,30 60,26 80,29 100,27 120,31 140,28 160,29";
+      const pressureAlarm = "0,29 20,27 40,25 60,21 80,14 100,8 120,6 140,5 160,4";
+      const normalError = "0,31 20,28 40,32 60,26 80,29 100,27 120,31 140,29 160,30";
+      const errorAlarm = "0,31 20,28 40,32 60,25 80,18 100,8 120,5 140,4 160,3";
+      const idleSpeed = "0,48 20,48 40,48 60,48 80,48 100,48 120,48 140,48 160,48";
+      const runSpeed = "0,48 13,39 25,13 47,13 57,34 67,13 92,13 102,34 113,13 140,13 151,38 160,48";
+      $("pressureCurve").setAttribute("points", state.alarmSource === "pressure" ? pressureAlarm : normalPressure);
+      $("errorCurve").setAttribute("points", state.alarmSource === "following" ? errorAlarm : normalError);
+      $("speedCurve").setAttribute("points", state.stepIndex >= 10 && state.stepIndex <= 13 ? runSpeed : idleSpeed);
+      $("pressureCurve").style.stroke = state.alarmSource === "pressure" ? "var(--red)" : "var(--green)";
+      $("errorCurve").style.stroke = state.alarmSource === "following" ? "var(--red)" : "var(--blue)";
+      $("pressureValue").textContent = state.alarmSource === "pressure" ? "0.58" : "0.42";
+      $("errorValue").textContent = state.alarmSource === "following" ? "0.286" : "0.006";
+      $("speedValue").textContent = state.motionState === "Dispensing" ? (state.stepIndex === 11 ? "24.0" : "60.0") : "0.0";
+    }
+
+    function updateResultCard() {
+      const card = $("resultCard"); card.className = "result-card";
+      let mark = "--", title = "Waiting for cycle", reason = "qualityResult = Unknown";
+      if (state.qualityResult === "OK") { card.classList.add("ok"); mark="OK"; title="Glue line accepted"; reason="MES upload · TRACE-DISP-001"; }
+      if (state.qualityResult === "NG") { card.classList.add("ng"); mark="NG"; title="Glue line requires review"; reason="NGReason: Pressure fluctuation"; }
+      if (state.qualityResult === "Alarm") { card.classList.add("alarm"); mark="ALM"; title="Cycle stopped for protection"; reason=state.alarmSource === "pressure" ? "ALM-P201 · High pressure" : "ALM-M103 · Following error"; }
+      $("resultMark").textContent = mark; $("resultTitle").textContent = title; $("resultReason").textContent = reason;
+    }
+
+    function appendLog(message, level = "") {
+      const row = document.createElement("div"); row.className = `log-line ${level}`;
+      const t = new Date(); const time = [t.getHours(),t.getMinutes(),t.getSeconds()].map(v=>String(v).padStart(2,"0")).join(":");
+      row.innerHTML = `<span class="time">${time}</span><span class="msg">${message}</span>`;
+      $("logWindow").appendChild(row); $("logWindow").scrollTop = $("logWindow").scrollHeight;
+    }
+
+    // GSAP 主时间线负责业务顺序；每个回调再驱动三栏统一状态。
+    function buildTimeline() {
+      masterTimeline?.kill(); stepTimes = [];
+      const clock = {v:0};
+      masterTimeline = gsap.timeline({paused:true, onComplete:() => { state.playing=false; $("playMode").textContent="COMPLETE · READY"; }});
+      animationSteps.forEach((step,index) => {
+        stepTimes[index] = masterTimeline.duration();
+        masterTimeline.call(() => updateStep(index), []);
+        const duration = index === 10 ? 3.4 : index === 11 || index === 12 ? 2.9 : 1.8;
+        masterTimeline.to(clock, {v:index+1,duration,ease:"none"});
+      });
+    }
+
+    function playAnimation() {
+      if (state.motionState === "Alarm") return appendLog("Alarm is active. Reset it before continuing.", "alarm");
+      if (masterTimeline.progress() >= 1) restartAnimation();
+      state.playing = true; $("playMode").textContent = "PLAYING · GSAP TIMELINE";
+      if (pathTween && state.stepIndex >= 10 && state.stepIndex <= 12) pathTween.resume();
+      masterTimeline.play();
+    }
+
+    function pauseAnimation() {
+      masterTimeline.pause(); pathTween?.pause(); state.playing = false; $("playMode").textContent = "PAUSED · STATE HELD";
+    }
+
+    function restartAnimation() {
+      pathTween?.kill(); state.axisProgress = 0; state.segmentIndex = 0; state.qualityResult = "Unknown"; state.alarmSource = null;
+      state.pressureState = "Normal"; state.motionState = "Idle"; state.dispenseState = "ValveOff";
+      $("logWindow").innerHTML = ""; preparePaths();
+      $("gluePath").style.stroke = "#67f0a6"; $("pathPreview").style.opacity = 0; $("pathOriginal").style.opacity = 0;
+      $("pathBounds").style.opacity = 0; $("softLimit").style.opacity = 0; $("clampGroup").classList.remove("clamped");
+      $("nozzleTravel").setAttribute("transform","translate(337 304)"); $("nozzleZ").classList.remove("down","valve-on"); $("glueDrop").style.opacity=0;
+      document.querySelectorAll(".led").forEach(el => el.classList.remove("on","bad")); document.querySelectorAll(".check").forEach(el => el.classList.remove("pass"));
+      resetTransientScene(); buildTimeline(); updateChecklist(-1); updateStatusCards(); updateAxisTable(); updateSegmentList(); updateValveState(); updateCurves(); updateResultCard();
+      $("stepNumber").textContent = "STEP 00 / 19"; $("stepDescription").textContent = "等待启动：轨迹还没有被加载，阀门关闭，三轴处于 Idle。"; $("playMode").textContent="PLAYING · GSAP TIMELINE";
+      appendLog("Animation restarted. State machine = Idle."); state.playing=true; masterTimeline.play();
+    }
+
+    function stepNext() {
+      masterTimeline.pause(); pathTween?.pause(); state.playing=false;
+      let next = state.stepIndex + 1; if (next >= animationSteps.length || state.motionState === "Alarm") next = 0;
+      if (next === 0 && state.stepIndex >= animationSteps.length - 1) { restartAnimation(); pauseAnimation(); return; }
+      updateStep(next); $("playMode").textContent = "PAUSED · SINGLE STEP";
+      masterTimeline.seek((stepTimes[next] || 0) + .02, true);
+    }
+
+    function toggleInspectionResult() {
+      state.desiredResult = state.desiredResult === "OK" ? "NG" : "OK";
+      $("resultToggle").textContent = `Result Plan: ${state.desiredResult}`;
+      if (state.stepIndex >= 16 && state.motionState !== "Alarm") {
+        state.qualityResult = state.desiredResult; updateStatusCards(); updateResultCard();
+        $("gluePath").style.stroke = state.desiredResult === "OK" ? "var(--green)" : "var(--orange)";
+        const node = state.stepIndex === 17 ? (state.desiredResult === "OK" ? "save-ok" : "save-ng") : "judge";
+        highlightCurrentNode(node); selectNode(node);
+        appendLog(`Inspection result switched to ${state.desiredResult}.`, state.desiredResult === "NG" ? "warn" : "ok");
+      } else appendLog(`Planned quality branch = ${state.desiredResult}.`, "warn");
+    }
+
+    function enterAlarm(source) {
+      masterTimeline.pause(); pathTween?.kill(); state.playing=false; state.alarmSource=source;
+      state.motionState="Alarm"; state.dispenseState="ValveOff"; state.qualityResult="Alarm"; state.pressureState = source === "pressure" ? "Alarm" : "Normal";
+      $("nozzleZ").classList.remove("valve-on"); $("glueDrop").style.opacity=0; $("sceneWrap").classList.add("alarm-flash");
+      $("alarmTower").classList.add("alarm"); $(source === "pressure" ? "pressureSensor" : "servoX").classList.add("alarm");
+      document.querySelectorAll(".bus").forEach(el => el.classList.remove("active","feedback","process"));
+      $("sensorFeedback").classList.add("alarm"); $("gluePath").style.stroke = "var(--red)";
+      highlightCurrentNode("alarm-stop"); selectNode("alarm-stop");
+      $("currentCommand").textContent="StopInterpolation(); ValveOff(); StopAllAxes()"; $("commandState").textContent="ALARM STOP";
+      $("stepDescription").textContent = source === "pressure" ? "胶压越过 0.48 MPa 上限：立即停止插补、关闭阀门并停轴。" : "X 轴跟随误差超过 0.20 mm：控制器停止全部轴并等待人工处理。";
+      $("playMode").textContent="STOPPED · PROTECTIVE ALARM";
+      updateStatusCards(); updateAxisTable(); updateValveState(); updateCurves(); updateResultCard();
+    }
+
+    function injectPressureAlarm() {
+      enterAlarm("pressure"); $("pressureReadout").textContent="0.58 MPa"; $("sensorState").textContent="ALARM · AI 3.02V";
+      appendLog("Pressure alarm detected: 0.58 MPa > 0.48 MPa.","alarm"); appendLog("Stop interpolation. Valve off. Stop all axes.","alarm");
+    }
+
+    function injectFollowingError() {
+      enterAlarm("following"); appendLog("Following error exceeded limit: X = 0.286 mm.","alarm"); appendLog("Stop all axes. Wait for operator reset.","alarm");
+    }
+
+    function resetAlarm() {
+      if (!state.alarmSource) return appendLog("No active alarm to reset.","warn");
+      const source = state.alarmSource; state.alarmSource=null; state.motionState="ResetRequired"; state.dispenseState="ValveOff"; state.pressureState="Normal"; state.qualityResult="Unknown";
+      state.stepIndex=1; state.axisProgress=0; state.segmentIndex=0; $("pressureReadout").textContent="0.42 MPa"; $("sensorState").textContent="Normal · AI 2.16V";
+      $("gluePath").style.stroke="#67f0a6"; $("sceneWrap").classList.remove("alarm-flash"); document.querySelectorAll(".device").forEach(el=>el.classList.remove("alarm"));
+      highlightCurrentNode("manual-reset"); selectNode("manual-reset");
+      $("currentCommand").textContent="AlarmReset(); ServoReset(); CheckValve();"; $("commandState").textContent="RESET REQUIRED";
+      $("stepDescription").textContent="报警已复位，但轴位置不再可信；下一步必须重新执行伺服使能与回原点。"; $("playMode").textContent="PAUSED · HOME AGAIN REQUIRED";
+      updateStatusCards(); updateAxisTable(); updateValveState(); updateCurves(); updateResultCard();
+      appendLog(`Operator confirmed. ${source} alarm reset.`,"warn"); appendLog("Please home axes again before restarting.","warn");
+      masterTimeline.seek(stepTimes[2] || 0, true).pause();
+    }
+
+    function init() {
+      renderFlowNodes(); preparePaths(); updateSegmentList(); updateAxisTable(); updateValveState(); updateChecklist(-1); updateCurves(); updateStatusCards(); updateResultCard();
+      selectNode("load-recipe"); highlightCurrentNode("load-recipe"); buildTimeline();
+      appendLog("System initialized. Select Play or Step Next.");
+      // 环境光动画由 GSAP 驱动，核心工艺动画仍受主时间线控制。
+      gsap.to("#flowToken", {boxShadow:"0 0 18px rgba(61,229,220,.95)",duration:.8,repeat:-1,yoyo:true,ease:"sine.inOut"});
+    }
+
+    window.addEventListener("DOMContentLoaded", init);
+  </script>
+</body>
+</html>

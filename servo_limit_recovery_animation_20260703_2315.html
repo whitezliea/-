@@ -1,0 +1,2110 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>上位机运动控制中的伺服报警与限位恢复动画</title>
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+  <style>
+    :root {
+      --bg: #071019;
+      --bg-2: #0a1621;
+      --panel: rgba(12, 29, 41, .94);
+      --panel-2: #102536;
+      --line: #28475b;
+      --text: #e5f5ff;
+      --muted: #87a6b8;
+      --blue: #3ea6ff;
+      --cyan: #2ed7d0;
+      --green: #49dd91;
+      --orange: #ffad42;
+      --red: #ff5364;
+      --gray: #607888;
+      --shadow: 0 18px 50px rgba(0, 0, 0, .28);
+    }
+
+    * { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 15% -10%, rgba(62, 166, 255, .13), transparent 33%),
+        radial-gradient(circle at 96% 12%, rgba(46, 215, 208, .08), transparent 27%),
+        linear-gradient(180deg, #061019 0%, #09141d 100%);
+      font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+      min-width: 1180px;
+    }
+
+    button { font: inherit; }
+
+    .app-shell {
+      width: min(1920px, 100%);
+      margin: 0 auto;
+      padding: 22px 22px 48px;
+    }
+
+    .hero {
+      position: relative;
+      overflow: hidden;
+      display: grid;
+      grid-template-columns: 1.35fr .65fr;
+      gap: 22px;
+      padding: 24px 28px;
+      border: 1px solid rgba(80, 145, 180, .36);
+      border-radius: 18px;
+      background: linear-gradient(120deg, rgba(14, 38, 55, .96), rgba(8, 25, 37, .93));
+      box-shadow: var(--shadow);
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      right: -80px;
+      top: -120px;
+      width: 430px;
+      height: 430px;
+      border: 1px solid rgba(62, 166, 255, .15);
+      border-radius: 50%;
+      box-shadow: 0 0 0 44px rgba(62, 166, 255, .025), 0 0 0 88px rgba(62, 166, 255, .018);
+      pointer-events: none;
+    }
+
+    .eyebrow {
+      color: var(--cyan);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 8px 0 11px;
+      font-size: clamp(27px, 2.2vw, 42px);
+      line-height: 1.16;
+      letter-spacing: -.025em;
+    }
+
+    .hero p {
+      max-width: 1080px;
+      margin: 0;
+      color: #a9c2d1;
+      font-size: 14px;
+      line-height: 1.85;
+    }
+
+    .hero-meaning {
+      position: relative;
+      z-index: 1;
+      align-self: stretch;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      padding: 17px 19px;
+      border: 1px solid rgba(73, 221, 145, .27);
+      border-left: 4px solid var(--green);
+      border-radius: 12px;
+      background: rgba(6, 20, 27, .6);
+      color: #cae8d8;
+      font-size: 13px;
+      line-height: 1.65;
+    }
+
+    .hero-meaning strong { color: var(--green); margin-bottom: 4px; }
+
+    .control-deck {
+      position: sticky;
+      z-index: 30;
+      top: 0;
+      margin: 14px 0;
+      padding: 12px;
+      border: 1px solid rgba(75, 130, 160, .35);
+      border-radius: 14px;
+      background: rgba(7, 18, 27, .92);
+      backdrop-filter: blur(16px);
+      box-shadow: 0 12px 32px rgba(0,0,0,.25);
+    }
+
+    .controls {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 7px;
+    }
+
+    .control-group {
+      display: flex;
+      gap: 7px;
+      padding-right: 9px;
+      margin-right: 2px;
+      border-right: 1px solid #264356;
+    }
+
+    .control-group:last-child { border-right: 0; }
+
+    .btn {
+      min-height: 34px;
+      padding: 7px 11px;
+      border: 1px solid #355b72;
+      border-radius: 8px;
+      color: #dff4ff;
+      background: linear-gradient(180deg, #173347, #11283a);
+      cursor: pointer;
+      transition: .18s ease;
+      white-space: nowrap;
+      font-size: 12px;
+      font-weight: 720;
+    }
+
+    .btn:hover:not(:disabled) { transform: translateY(-1px); border-color: var(--blue); filter: brightness(1.1); }
+    .btn:active:not(:disabled) { transform: translateY(0); }
+    .btn.primary { border-color: rgba(62,166,255,.7); background: linear-gradient(180deg, #1262a1, #10456e); }
+    .btn.warn { border-color: rgba(255,173,66,.65); color: #ffe2b8; }
+    .btn.danger { border-color: rgba(255,83,100,.68); color: #ffd3d8; background: linear-gradient(180deg, #6b2631, #431f29); }
+    .btn.recovery { border-color: rgba(46,215,208,.62); color: #c8fffb; }
+    .btn:disabled { opacity: .36; cursor: not-allowed; filter: grayscale(.4); }
+
+    .scenario-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      margin-left: auto;
+      padding: 7px 11px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,83,100,.4);
+      background: rgba(255,83,100,.08);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .scenario-pill::before {
+      content: "";
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--red);
+      box-shadow: 0 0 12px var(--red);
+    }
+
+    .scenario-pill.soft { border-color: rgba(255,173,66,.5); background: rgba(255,173,66,.08); }
+    .scenario-pill.soft::before { background: var(--orange); box-shadow: 0 0 12px var(--orange); }
+    .scenario-pill.normal { border-color: rgba(73,221,145,.45); background: rgba(73,221,145,.08); }
+    .scenario-pill.normal::before { background: var(--green); box-shadow: 0 0 12px var(--green); }
+
+    .status-strip {
+      display: grid;
+      grid-template-columns: 1.4fr 1fr 1fr 1fr 1.2fr 1.15fr 1.2fr .85fr;
+      gap: 7px;
+      margin-top: 10px;
+    }
+
+    .status-chip {
+      min-width: 0;
+      padding: 8px 10px;
+      border: 1px solid #243f50;
+      border-radius: 8px;
+      background: #0b1d2a;
+    }
+
+    .status-chip .k { display: block; margin-bottom: 3px; color: #708fa2; font-size: 9px; letter-spacing: .08em; text-transform: uppercase; }
+    .status-chip .v { display: block; overflow: hidden; color: #ccecff; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+    .status-chip.state .v { color: var(--green); font-weight: 800; }
+    .status-chip.alarm .v { color: var(--red); }
+
+    .step-banner {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      margin-top: 8px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      background: rgba(62,166,255,.08);
+      color: #bdd9e8;
+      font-size: 12px;
+    }
+
+    .step-index {
+      flex: 0 0 auto;
+      padding: 3px 7px;
+      border-radius: 5px;
+      background: var(--blue);
+      color: #04121d;
+      font-weight: 900;
+    }
+
+    .theater {
+      display: grid;
+      grid-template-columns: minmax(0, 1.03fr) minmax(0, 1.18fr) minmax(310px, .79fr);
+      gap: 12px;
+      align-items: start;
+    }
+
+    .column {
+      min-width: 0;
+      border: 1px solid rgba(72, 119, 146, .34);
+      border-radius: 15px;
+      background: linear-gradient(180deg, rgba(13, 31, 44, .96), rgba(8, 23, 34, .95));
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .column-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 58px;
+      padding: 13px 15px;
+      border-bottom: 1px solid #203c4e;
+      background: rgba(17, 42, 58, .72);
+    }
+
+    .column-head h2 { margin: 0; font-size: 15px; letter-spacing: .01em; }
+    .column-head span { color: #7899aa; font-size: 10px; font-family: ui-monospace, monospace; }
+    .column-body { padding: 11px; }
+
+    .scene-wrap {
+      overflow: hidden;
+      border: 1px solid #254559;
+      border-radius: 12px;
+      background: #071823;
+    }
+
+    #machineScene { display: block; width: 100%; height: auto; }
+
+    .svg-label { fill: #a9c8d9; font-size: 9px; font-weight: 700; }
+    .svg-micro { fill: #7596a9; font-size: 7.5px; }
+    .wire { fill: none; stroke: #2d617e; stroke-width: 2; stroke-dasharray: 5 5; }
+    .signal-dot { opacity: 0; filter: drop-shadow(0 0 5px currentColor); }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      padding: 9px 10px;
+      border-top: 1px solid #213e50;
+      background: #0b202d;
+      color: #8eacbc;
+      font-size: 9px;
+    }
+
+    .legend i { display: inline-block; width: 7px; height: 7px; margin-right: 4px; border-radius: 50%; }
+
+    .scene-notes {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 9px;
+    }
+
+    .note-card {
+      padding: 9px 10px;
+      border: 1px solid #254354;
+      border-radius: 9px;
+      background: rgba(9,29,42,.78);
+      color: #9db9c8;
+      font-size: 10px;
+      line-height: 1.5;
+    }
+
+    .note-card b { display: block; margin-bottom: 3px; color: #d5edf8; font-size: 10px; }
+
+    .debug-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .tech-card {
+      min-width: 0;
+      padding: 10px;
+      border: 1px solid #29495d;
+      border-radius: 10px;
+      background: rgba(10, 29, 42, .9);
+      transition: .2s ease;
+    }
+
+    .tech-card.full { grid-column: 1 / -1; }
+    .tech-card.warning { border-color: rgba(255,173,66,.75); box-shadow: inset 0 0 26px rgba(255,173,66,.07); }
+    .tech-card.danger { border-color: rgba(255,83,100,.75); box-shadow: inset 0 0 30px rgba(255,83,100,.08); }
+    .tech-card.success { border-color: rgba(73,221,145,.68); box-shadow: inset 0 0 30px rgba(73,221,145,.06); }
+
+    .card-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 8px;
+      color: #d6edf8;
+      font-size: 11px;
+      font-weight: 850;
+      letter-spacing: .02em;
+    }
+
+    .card-title .tag {
+      padding: 2px 5px;
+      border: 1px solid #2c5268;
+      border-radius: 5px;
+      color: #7fa7bc;
+      font: 8px ui-monospace, monospace;
+      text-transform: uppercase;
+    }
+
+    .kv-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 9px; }
+    .kv { display: flex; justify-content: space-between; gap: 7px; min-width: 0; padding: 3px 0; border-bottom: 1px dashed rgba(66,101,121,.35); font-size: 9px; }
+    .kv span:first-child { color: #7596a9; }
+    .kv span:last-child { color: #c9e7f4; font-family: ui-monospace, monospace; text-align: right; }
+    .kv .ok { color: var(--green) !important; }
+    .kv .bad { color: var(--red) !important; font-weight: 800; }
+    .kv .warn { color: var(--orange) !important; }
+
+    .axis-table-wrap { overflow-x: auto; }
+    .axis-table { width: 100%; border-collapse: collapse; font-size: 8px; white-space: nowrap; }
+    .axis-table th { padding: 6px 5px; color: #789aaa; background: #0d2635; text-align: left; font-weight: 700; }
+    .axis-table td { padding: 6px 5px; color: #c4ddea; border-top: 1px solid #203b4c; font-family: ui-monospace, monospace; }
+    .axis-table tr.x-row td:first-child { color: var(--blue); font-weight: 900; }
+    .cell-ok { color: var(--green) !important; }
+    .cell-bad { color: var(--red) !important; font-weight: 900; }
+    .cell-warn { color: var(--orange) !important; }
+
+    .limit-list { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+    .limit-item { display: flex; align-items: center; justify-content: space-between; padding: 5px 6px; border-radius: 6px; background: #0c2231; color: #87a8b9; font-size: 9px; }
+    .io-led { width: 8px; height: 8px; border-radius: 50%; background: #466170; box-shadow: inset 0 0 0 2px rgba(0,0,0,.18); }
+    .io-led.on { background: var(--red); box-shadow: 0 0 9px rgba(255,83,100,.85); }
+
+    .chart-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .chart-box { position: relative; overflow: hidden; height: 104px; border: 1px solid #213e51; border-radius: 8px; background: #071a26; }
+    .chart-box svg { width: 100%; height: 100%; display: block; }
+    .chart-label { position: absolute; left: 7px; top: 5px; z-index: 1; color: #86a6b7; font-size: 8px; }
+    .chart-value { position: absolute; right: 7px; top: 5px; z-index: 1; color: var(--cyan); font: 8px ui-monospace, monospace; }
+
+    .checklist { display: grid; gap: 5px; }
+    .check-item { display: grid; grid-template-columns: 17px 1fr auto; align-items: center; gap: 7px; padding: 5px 6px; border-radius: 6px; background: #0b2230; color: #7d9baa; font-size: 9px; transition: .2s ease; }
+    .check-mark { display: grid; place-items: center; width: 15px; height: 15px; border: 1px solid #38596a; border-radius: 50%; font-size: 9px; }
+    .check-item.done { color: #c7f3db; background: rgba(73,221,145,.09); }
+    .check-item.done .check-mark { color: #062317; border-color: var(--green); background: var(--green); }
+    .check-item.current { color: #d8fffd; outline: 1px solid rgba(46,215,208,.5); }
+    .check-state { font: 8px ui-monospace, monospace; color: #5f7f90; }
+
+    .alarm-copy { color: #8da9b8; font-size: 9px; line-height: 1.5; }
+    .alarm-copy strong { color: #e8f6fb; }
+    .alarm-empty { display: grid; place-items: center; min-height: 102px; color: #638295; font-size: 10px; text-align: center; }
+
+    .final-result {
+      display: grid;
+      grid-template-columns: 42px 1fr;
+      align-items: center;
+      gap: 10px;
+      min-height: 78px;
+    }
+
+    .result-icon { display: grid; place-items: center; width: 38px; height: 38px; border: 1px solid #395969; border-radius: 50%; color: #607f90; background: #0b2230; font-size: 18px; }
+    .final-result.done .result-icon { color: #032015; border-color: var(--green); background: var(--green); box-shadow: 0 0 18px rgba(73,221,145,.35); }
+    .final-result h4 { margin: 0 0 3px; color: #cfe6f0; font-size: 11px; }
+    .final-result p { margin: 0; color: #6f8e9e; font-size: 9px; line-height: 1.45; }
+
+    .log-window { height: 138px; overflow-y: auto; padding: 7px; border: 1px solid #1e3b4c; border-radius: 7px; background: #061620; font: 8.5px/1.65 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .log-line { display: grid; grid-template-columns: 48px 43px 1fr; gap: 5px; color: #91aebd; border-bottom: 1px dotted rgba(58,89,106,.24); }
+    .log-time { color: #55778a; }
+    .log-level { color: var(--blue); }
+    .log-level.warn { color: var(--orange); }
+    .log-level.alarm { color: var(--red); }
+    .log-level.recovery { color: var(--cyan); }
+
+    .flow-column .column-body { padding: 9px; }
+    .flow-map { max-height: 1498px; overflow-y: auto; padding: 2px 5px 16px 2px; scrollbar-color: #33566b #0b1c28; scrollbar-width: thin; }
+    .flow-section-title { display: flex; align-items: center; gap: 8px; margin: 10px 3px 6px; color: #6f91a4; font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: .09em; }
+    .flow-section-title::after { content: ""; flex: 1; height: 1px; background: #254354; }
+
+    .flow-node {
+      position: relative;
+      display: grid;
+      grid-template-columns: 26px 1fr auto;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      min-height: 48px;
+      margin: 0 0 8px;
+      padding: 7px 8px;
+      border: 1px solid #29485b;
+      border-radius: 9px;
+      color: #d3e9f4;
+      background: linear-gradient(180deg, #102a3a, #0d2230);
+      text-align: left;
+      cursor: pointer;
+      transition: .2s ease;
+    }
+
+    .flow-node::after {
+      content: "";
+      position: absolute;
+      left: 20px;
+      bottom: -9px;
+      width: 1px;
+      height: 9px;
+      background: #315568;
+    }
+
+    .flow-node:last-child::after { display: none; }
+    .flow-node:hover { transform: translateX(2px); border-color: #4b7a94; }
+    .node-no { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 7px; color: #7fa3b5; background: #071a26; font: 8px ui-monospace, monospace; }
+    .node-title { display: block; margin-bottom: 2px; font-size: 10px; font-weight: 800; }
+    .node-short { display: block; color: #668798; font: 8px ui-monospace, monospace; }
+    .node-state { padding: 2px 5px; border-radius: 4px; color: #628293; background: #091b27; font-size: 7px; }
+    .flow-node.soft { border-left: 3px solid rgba(255,173,66,.68); }
+    .flow-node.alarm { border-left: 3px solid rgba(255,83,100,.72); }
+    .flow-node.recovery { border-left: 3px solid rgba(46,215,208,.7); }
+    .flow-node.normal { border-left: 3px solid rgba(73,221,145,.65); }
+    .flow-node.completed { opacity: .67; }
+    .flow-node.completed .node-state { color: var(--green); }
+    .flow-node.selected { outline: 1px solid rgba(255,255,255,.48); outline-offset: 2px; }
+    .flow-node.active { transform: translateX(3px) scale(1.01); border-color: var(--blue); background: linear-gradient(180deg, #164465, #10324b); box-shadow: 0 0 22px rgba(62,166,255,.2); opacity: 1; }
+    .flow-node.active.soft { border-color: var(--orange); box-shadow: 0 0 22px rgba(255,173,66,.22); }
+    .flow-node.active.alarm { border-color: var(--red); box-shadow: 0 0 24px rgba(255,83,100,.28); }
+    .flow-node.active.recovery, .flow-node.active.normal { border-color: var(--green); box-shadow: 0 0 22px rgba(73,221,145,.21); }
+
+    .flow-token {
+      position: absolute;
+      z-index: 2;
+      right: 6px;
+      top: -7px;
+      max-width: 128px;
+      padding: 3px 6px;
+      border-radius: 999px;
+      color: #06131b;
+      background: var(--blue);
+      box-shadow: 0 0 14px rgba(62,166,255,.6);
+      font: 7px ui-monospace, monospace;
+      white-space: nowrap;
+    }
+
+    .flow-node.alarm.active .flow-token { background: var(--red); box-shadow: 0 0 15px rgba(255,83,100,.65); }
+    .flow-node.recovery.active .flow-token { background: var(--cyan); box-shadow: 0 0 15px rgba(46,215,208,.6); }
+
+    .detail-panel {
+      margin-top: 13px;
+      border: 1px solid rgba(75, 126, 154, .4);
+      border-radius: 15px;
+      overflow: hidden;
+      background: linear-gradient(180deg, rgba(13,31,44,.98), rgba(8,23,34,.97));
+      box-shadow: var(--shadow);
+    }
+
+    .detail-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 14px 17px;
+      border-bottom: 1px solid #244254;
+      background: rgba(17,42,58,.72);
+    }
+
+    .detail-head h2 { margin: 0; font-size: 16px; }
+    .detail-head p { margin: 3px 0 0; color: #7393a4; font-size: 10px; }
+    .detail-node-id { padding: 5px 8px; border: 1px solid #335a70; border-radius: 6px; color: var(--cyan); font: 9px ui-monospace, monospace; }
+
+    .detail-grid { display: grid; grid-template-columns: 1.25fr 1fr 1fr 1.2fr; gap: 9px; padding: 12px; }
+    .detail-item { min-width: 0; padding: 11px; border: 1px solid #254355; border-radius: 9px; background: #0a2030; }
+    .detail-item h3 { margin: 0 0 6px; color: #75a4bb; font-size: 9px; letter-spacing: .08em; text-transform: uppercase; }
+    .detail-item p, .detail-item ul { margin: 0; color: #b4d0dd; font-size: 10px; line-height: 1.65; }
+    .detail-item ul { padding-left: 15px; }
+    .detail-item.interview { grid-column: 1 / -1; display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 12px; border-color: rgba(46,215,208,.38); background: rgba(46,215,208,.055); }
+    .detail-item.interview h3 { margin: 0; color: var(--cyan); }
+    .detail-item.interview p { color: #dbfffd; font-size: 12px; }
+
+    .footer-note { margin-top: 13px; color: #5f7f90; font-size: 10px; text-align: center; }
+
+    @keyframes alarmBlink {
+      0%, 100% { opacity: 1; filter: drop-shadow(0 0 10px rgba(255,83,100,.95)); }
+      50% { opacity: .2; filter: none; }
+    }
+
+    .alarm-blink { animation: alarmBlink .7s infinite; }
+
+    @media (max-width: 1500px) {
+      .app-shell { padding: 14px 14px 40px; }
+      .theater { grid-template-columns: minmax(0, 1fr) minmax(0, 1.13fr) minmax(300px, .82fr); }
+      .status-strip { grid-template-columns: repeat(4, 1fr); }
+      .detail-grid { grid-template-columns: 1fr 1fr; }
+      .detail-item.interview { grid-column: 1 / -1; }
+    }
+  </style>
+</head>
+<body>
+  <main class="app-shell">
+    <header class="hero">
+      <div>
+        <div class="eyebrow">servo_limit_recovery · Industrial Motion Control Theater</div>
+        <h1>上位机运动控制中的伺服报警与限位恢复动画</h1>
+        <p>这个动画展示上位机在运动控制过程中如何处理软限位、硬限位和伺服报警。系统在运动前先检查目标点是否超过软限位；如果运动中触发硬限位或伺服报警，上位机会立即停止轴运动、关闭危险输出、进入 Alarm 状态，并锁定自动运行。恢复时，操作员需要确认现场安全，低速手动退限位，复位伺服报警，重新回原点，最后清除报警并恢复 Ready。重点不是 MoveAbs API，而是安全边界、状态监控、报警锁定和恢复流程。</p>
+      </div>
+      <div class="hero-meaning">
+        <strong>核心结论 / Safety First</strong>
+        机器运动一旦变得不安全或坐标不可信，先保护人员与设备；再通过受控恢复，重新建立安全状态和可信坐标。
+      </div>
+    </header>
+
+    <section class="control-deck" aria-label="动画控制区">
+      <div class="controls">
+        <div class="control-group">
+          <button class="btn primary" id="playBtn" onclick="playAnimation()">▶ Play</button>
+          <button class="btn" onclick="pauseAnimation()">Ⅱ Pause</button>
+          <button class="btn" onclick="restartAnimation()">↻ Restart</button>
+          <button class="btn" onclick="stepNext()">Step Next →</button>
+        </div>
+        <div class="control-group">
+          <button class="btn warn" id="scenarioBtn" onclick="toggleScenario()">Toggle Scenario</button>
+          <button class="btn danger" onclick="injectServoAlarm()">Inject Servo Alarm</button>
+          <button class="btn danger" onclick="injectHardLimit()">Inject Hard Limit</button>
+        </div>
+        <div class="control-group">
+          <button class="btn recovery" id="jogBtn" onclick="jogAway()">Jog Away</button>
+          <button class="btn recovery" id="resetBtn" onclick="resetServo()">Reset Servo</button>
+          <button class="btn recovery" id="homeBtn" onclick="rehomeAxes()">Re-home</button>
+          <button class="btn recovery" id="clearBtn" onclick="clearAlarm()">Clear Alarm</button>
+        </div>
+        <div class="scenario-pill" id="scenarioPill">Hard Limit Alarm</div>
+      </div>
+      <div class="status-strip">
+        <div class="status-chip"><span class="k">workpieceId</span><span class="v" id="workpieceValue">WP-LIMIT-001</span></div>
+        <div class="status-chip"><span class="k">axisCommandId</span><span class="v" id="commandIdValue">CMD-MOVE-X-001</span></div>
+        <div class="status-chip alarm"><span class="k">alarmId</span><span class="v" id="alarmIdValue">—</span></div>
+        <div class="status-chip state"><span class="k">motionState</span><span class="v" id="motionStateValue">Ready</span></div>
+        <div class="status-chip"><span class="k">axisState</span><span class="v" id="axisStateValue">Ready</span></div>
+        <div class="status-chip"><span class="k">limitState</span><span class="v" id="limitStateValue">Normal</span></div>
+        <div class="status-chip"><span class="k">recoveryState</span><span class="v" id="recoveryStateValue">NotRequired</span></div>
+        <div class="status-chip"><span class="k">X position</span><span class="v" id="xPositionValue">80.00 mm</span></div>
+      </div>
+      <div class="step-banner">
+        <span class="step-index" id="stepIndexLabel">01</span>
+        <span id="stepDescription">设备安全待机，伺服已使能、回零完成、无活动报警。</span>
+      </div>
+    </section>
+
+    <section class="theater">
+      <section class="column scene-column">
+        <div class="column-head">
+          <h2>工业现场：三轴平台限位报警恢复</h2>
+          <span>FIELD / MACHINE</span>
+        </div>
+        <div class="column-body">
+          <div class="scene-wrap">
+            <svg id="machineScene" viewBox="0 0 680 590" role="img" aria-label="三轴检测平台、控制链路、限位与恢复动画">
+              <defs>
+                <linearGradient id="steel" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0" stop-color="#28485a" />
+                  <stop offset="1" stop-color="#142a37" />
+                </linearGradient>
+                <linearGradient id="screen" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0" stop-color="#0d3952" />
+                  <stop offset="1" stop-color="#071c29" />
+                </linearGradient>
+                <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
+                  <path d="M20 0H0V20" fill="none" stroke="#153141" stroke-width="1" />
+                </pattern>
+                <filter id="glowBlue"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+                <filter id="glowRed"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+              </defs>
+
+              <rect width="680" height="590" fill="#071824" />
+              <rect width="680" height="590" fill="url(#grid)" opacity=".55" />
+
+              <!-- IPC / HMI -->
+              <g id="ipcGroup">
+                <rect x="22" y="24" width="126" height="92" rx="8" fill="url(#steel)" stroke="#4b7b96" />
+                <rect x="32" y="34" width="106" height="58" rx="4" fill="url(#screen)" stroke="#32637e" />
+                <text x="40" y="49" class="svg-label">IPC / HMI</text>
+                <text x="40" y="65" id="hmiStatusText" fill="#49dd91" font-size="12" font-weight="900">READY</text>
+                <text x="40" y="79" id="hmiTargetText" class="svg-micro">Target X: 260.00 mm</text>
+                <circle cx="84" cy="103" r="4" fill="#49dd91" id="readyLamp" />
+                <path d="M64 116h40l8 9H56z" fill="#1a3545" />
+                <g id="hmiAlarmPopup" opacity="0">
+                  <rect x="35" y="39" width="100" height="47" rx="4" fill="#571f2a" stroke="#ff5364" />
+                  <text x="43" y="53" fill="#ffd8dd" font-size="8" font-weight="900">ALARM / AUTO LOCK</text>
+                  <text x="43" y="66" fill="#fff" font-size="7.5">X Axis Positive Limit</text>
+                  <text x="43" y="77" fill="#ffb9c1" font-size="6.5">Jog away → Reset → Home</text>
+                </g>
+              </g>
+
+              <!-- Motion card and servo drives -->
+              <g id="motionCard">
+                <rect x="186" y="30" width="108" height="78" rx="7" fill="url(#steel)" stroke="#3d7898" />
+                <text x="199" y="48" class="svg-label">Motion Card</text>
+                <text x="199" y="61" class="svg-micro">PCIe / EtherCAT</text>
+                <circle cx="204" cy="80" r="4" fill="#49dd91" />
+                <circle cx="220" cy="80" r="4" fill="#3ea6ff" />
+                <circle cx="236" cy="80" r="4" fill="#2ed7d0" />
+                <path d="M198 94h83" stroke="#315a70" stroke-width="2" />
+              </g>
+
+              <g id="servoDrives">
+                <g id="xServoDrive">
+                  <rect x="330" y="22" width="86" height="88" rx="7" fill="url(#steel)" stroke="#3e718b" />
+                  <text x="342" y="40" class="svg-label">X Servo Drive</text>
+                  <rect x="341" y="48" width="64" height="24" rx="3" fill="#081b27" stroke="#345c70" />
+                  <text x="351" y="63" id="xDriveText" fill="#49dd91" font-size="9" font-weight="900">SERVO ON</text>
+                  <circle cx="352" cy="88" r="5" id="xDriveLed" fill="#49dd91" />
+                  <path d="M366 85h32M366 92h22" stroke="#456b7d" stroke-width="2" />
+                </g>
+                <g id="yServoDrive">
+                  <rect x="430" y="30" width="68" height="70" rx="6" fill="url(#steel)" stroke="#345c70" />
+                  <text x="439" y="48" class="svg-label">Y Drive</text>
+                  <circle cx="445" cy="69" r="4" fill="#49dd91" />
+                  <text x="456" y="72" class="svg-micro">ON</text>
+                </g>
+                <g id="zServoDrive">
+                  <rect x="508" y="30" width="68" height="70" rx="6" fill="url(#steel)" stroke="#345c70" />
+                  <text x="517" y="48" class="svg-label">Z Drive</text>
+                  <circle cx="523" cy="69" r="4" fill="#49dd91" />
+                  <text x="534" y="72" class="svg-micro">ON</text>
+                </g>
+              </g>
+              <g id="servoMotors">
+                <path d="M373 110v8M464 100v18M542 100v18" stroke="#416b80" stroke-width="2" />
+                <g id="xServoMotor"><circle cx="373" cy="131" r="12" fill="#173747" stroke="#5a8aa0" /><text x="369" y="135" fill="#b8d6e4" font-size="10" font-weight="900">M</text><text x="349" y="150" class="svg-micro">X Servo Motor</text></g>
+                <g id="yServoMotor"><circle cx="464" cy="131" r="12" fill="#173747" stroke="#5a8aa0" /><text x="460" y="135" fill="#b8d6e4" font-size="10" font-weight="900">M</text><text x="443" y="150" class="svg-micro">Y Motor</text></g>
+                <g id="zServoMotor"><circle cx="542" cy="131" r="12" fill="#173747" stroke="#5a8aa0" /><text x="538" y="135" fill="#b8d6e4" font-size="10" font-weight="900">M</text><text x="521" y="150" class="svg-micro">Z Motor</text></g>
+              </g>
+
+              <!-- MES / logs -->
+              <g id="mesGroup">
+                <ellipse cx="626" cy="42" rx="28" ry="10" fill="#173548" stroke="#3b718e" />
+                <path d="M598 42v42c0 6 56 6 56 0V42" fill="#112c3d" stroke="#3b718e" />
+                <ellipse cx="626" cy="84" rx="28" ry="10" fill="#102a3a" stroke="#3b718e" />
+                <text x="606" y="61" class="svg-label">MES / DB</text>
+                <text x="606" y="75" class="svg-micro">Alarm Log</text>
+              </g>
+
+              <path class="wire" d="M148 67H186" />
+              <path class="wire" d="M294 67H330" />
+              <path class="wire" d="M416 66H430M498 66H508" />
+              <path class="wire" d="M576 66H598" />
+              <path class="wire" d="M373 110V155H242V210" />
+
+              <!-- Alarm tower, emergency stop, reset, jog -->
+              <g id="alarmTower" transform="translate(600 134)">
+                <rect x="14" y="68" width="9" height="28" fill="#35505e" />
+                <rect x="4" y="94" width="30" height="7" rx="2" fill="#233e4d" />
+                <rect x="6" y="0" width="26" height="22" rx="6" fill="#49232b" stroke="#73303b" />
+                <rect x="6" y="23" width="26" height="22" rx="6" fill="#493d22" stroke="#736336" />
+                <rect x="6" y="46" width="26" height="22" rx="6" fill="#1e4b35" stroke="#2b7650" />
+                <circle id="towerRed" cx="19" cy="11" r="8" fill="#6e2934" />
+                <circle cx="19" cy="34" r="8" fill="#6c5828" />
+                <circle id="towerGreen" cx="19" cy="57" r="8" fill="#49dd91" />
+                <text x="-5" y="114" class="svg-label">Alarm Tower</text>
+              </g>
+
+              <g id="estopGroup" transform="translate(26 144)">
+                <rect x="0" y="18" width="64" height="38" rx="6" fill="#213b49" stroke="#486679" />
+                <circle cx="32" cy="22" r="17" fill="#ff5364" stroke="#ffc0c7" stroke-width="3" />
+                <rect x="20" y="0" width="24" height="17" rx="8" fill="#c93b4b" />
+                <text x="9" y="70" class="svg-label">Emergency Stop</text>
+              </g>
+
+              <g id="resetGroup" transform="translate(103 146)">
+                <rect x="0" y="0" width="58" height="52" rx="7" fill="#183342" stroke="#41667a" />
+                <circle id="resetButtonSvg" cx="29" cy="21" r="12" fill="#2d7362" stroke="#7ee8c4" />
+                <text x="13" y="45" class="svg-label">RESET</text>
+              </g>
+
+              <g id="jogPanel" transform="translate(487 137)">
+                <rect x="0" y="0" width="91" height="62" rx="7" fill="#162f3f" stroke="#416b80" />
+                <text x="10" y="16" class="svg-label">Manual Jog</text>
+                <rect x="10" y="25" width="29" height="25" rx="4" fill="#0b202d" stroke="#376077" />
+                <text x="21" y="42" fill="#83a7b8" font-size="12">−</text>
+                <rect x="52" y="25" width="29" height="25" rx="4" fill="#0b202d" stroke="#376077" />
+                <text x="62" y="42" fill="#83a7b8" font-size="12">+</text>
+                <text x="18" y="58" class="svg-micro">LOW SPEED</text>
+              </g>
+
+              <!-- Platform safe zone -->
+              <rect x="106" y="232" width="446" height="218" rx="10" fill="rgba(62,166,255,.035)" stroke="#2e6e92" stroke-dasharray="7 5" />
+              <text x="116" y="249" fill="#4f94b7" font-size="8" font-weight="800">SOFT LIMIT SAFE ZONE · X 0.00 ~ 300.00 mm</text>
+              <rect id="unsafeZone" x="552" y="232" width="49" height="218" fill="rgba(255,83,100,.08)" stroke="#76313d" stroke-dasharray="4 4" />
+              <text x="565" y="257" fill="#b45a65" font-size="7" transform="rotate(90 565 257)">OUTSIDE SOFTWARE LIMIT</text>
+
+              <!-- Camera and Z mechanism -->
+              <g id="cameraGroup">
+                <path d="M322 206V282" stroke="#50788a" stroke-width="12" />
+                <rect x="288" y="199" width="68" height="39" rx="5" fill="url(#steel)" stroke="#4c819a" />
+                <rect x="303" y="230" width="38" height="30" rx="4" fill="#122f40" stroke="#40748e" />
+                <circle cx="322" cy="245" r="9" fill="#081a25" stroke="#4bbcd0" />
+                <circle cx="322" cy="245" r="3" fill="#2ed7d0" />
+                <text x="298" y="216" class="svg-label">Camera</text>
+                <path d="M300 274h44l19 67h-82z" fill="rgba(46,215,208,.045)" stroke="#2b7580" stroke-dasharray="4 4" />
+                <text x="365" y="218" class="svg-micro">Z Lift</text>
+                <path d="M361 226v45" stroke="#3f6f84" stroke-width="4" />
+                <path d="M356 232l5-7 5 7M356 265l5 7 5-7" fill="none" stroke="#7ea7b8" />
+                <rect x="371" y="226" width="9" height="12" rx="2" fill="#273f4d" stroke="#6e8d9d" />
+                <rect x="371" y="259" width="9" height="12" rx="2" fill="#273f4d" stroke="#6e8d9d" />
+                <text x="382" y="235" class="svg-micro">Z+ Limit</text>
+                <text x="382" y="268" class="svg-micro">Z− Limit</text>
+              </g>
+
+              <!-- Y rail -->
+              <g id="yAxisGroup">
+                <rect x="195" y="292" width="278" height="126" rx="8" fill="#102b3a" stroke="#356077" />
+                <rect x="244" y="329" width="72" height="46" rx="5" fill="rgba(46,215,208,.055)" stroke="#2d777c" stroke-dasharray="4 3" />
+                <text x="251" y="346" fill="#5dc8c4" font-size="7.5" font-weight="800">CAMERA</text>
+                <text x="251" y="358" class="svg-micro">INSPECT POS</text>
+                <rect x="354" y="329" width="82" height="46" rx="5" fill="rgba(73,221,145,.05)" stroke="#37765a" stroke-dasharray="4 3" />
+                <text x="362" y="346" fill="#69cf96" font-size="7.5" font-weight="800">OK / NG</text>
+                <text x="362" y="358" class="svg-micro">UNLOAD POS</text>
+                <path d="M223 313H448M223 397H448" stroke="#395d70" stroke-width="7" />
+                <path d="M236 319V390M435 319V390" stroke="#203f50" stroke-width="3" stroke-dasharray="5 4" />
+                <rect x="203" y="305" width="12" height="20" rx="2" fill="#253e4c" stroke="#718b98" />
+                <rect x="453" y="386" width="12" height="20" rx="2" fill="#253e4c" stroke="#718b98" />
+                <text x="196" y="287" class="svg-label">Y Axis Rail / Y− &amp; Y+ Limit</text>
+              </g>
+
+              <!-- X rail -->
+              <g id="xAxisGroup">
+                <rect x="97" y="435" width="478" height="52" rx="8" fill="#112b39" stroke="#3f6577" />
+                <path d="M119 452H553M119 471H553" stroke="#557688" stroke-width="5" />
+                <path d="M129 461H543" stroke="#193746" stroke-width="5" stroke-dasharray="8 5" />
+                <text x="98" y="505" class="svg-label">X Axis Guide Rail</text>
+
+                <g id="xMinusLimit">
+                  <rect x="101" y="420" width="15" height="27" rx="2" fill="#465865" stroke="#9ab0bb" />
+                  <path d="M108 420v-8h12" stroke="#aabcc5" stroke-width="3" />
+                  <text x="92" y="407" fill="#a7bbc5" font-size="8" font-weight="800">X− LIMIT</text>
+                </g>
+                <g id="xPlusLimit">
+                  <rect id="xPlusSwitch" x="555" y="420" width="15" height="27" rx="2" fill="#465865" stroke="#9ab0bb" />
+                  <path id="xPlusLever" d="M562 420v-8h-12" stroke="#aabcc5" stroke-width="3" />
+                  <text x="544" y="407" id="xPlusLabel" fill="#a7bbc5" font-size="8" font-weight="800">X+ LIMIT</text>
+                </g>
+
+                <g id="homeSensor">
+                  <rect x="160" y="466" width="18" height="14" rx="2" fill="#1c5b58" stroke="#46cfc7" />
+                  <path d="M169 466v-16" stroke="#46cfc7" stroke-width="2" stroke-dasharray="3 2" />
+                  <text x="143" y="520" fill="#67cac8" font-size="8" font-weight="800">HOME SENSOR</text>
+                </g>
+              </g>
+
+              <!-- Moving carriage, clamp, workpiece -->
+              <g id="xCarriage" transform="translate(232 0)">
+                <rect x="-54" y="373" width="108" height="86" rx="8" fill="#23495b" stroke="#64a0bc" stroke-width="2" />
+                <rect x="-43" y="384" width="86" height="55" rx="5" fill="#102c3b" stroke="#41697c" />
+                <rect x="-26" y="394" width="52" height="33" rx="4" fill="#a77b40" stroke="#e4bd74" />
+                <text x="-21" y="414" fill="#fff1cf" font-size="8" font-weight="800">WORKPIECE</text>
+                <path id="clampLeft" d="M-40 391h12v42h-12M40 391H28v42h12" fill="none" stroke="#8fb3c3" stroke-width="5" />
+                <text x="-18" y="451" class="svg-micro">Clamp</text>
+                <circle cx="-38" cy="449" r="5" fill="#3ea6ff" />
+                <circle cx="38" cy="449" r="5" fill="#3ea6ff" />
+              </g>
+
+              <!-- Soft-limit target marker -->
+              <g id="targetMarker" transform="translate(474 0)">
+                <path d="M0 357v94" stroke="#3ea6ff" stroke-width="2" stroke-dasharray="5 4" />
+                <path d="M-7 365L0 354l7 11z" fill="#3ea6ff" />
+                <text x="8" y="368" id="targetMarkerText" fill="#69baff" font-size="8" font-weight="900">TARGET 260</text>
+              </g>
+
+              <!-- Jog path and interrupted motion trace -->
+              <path id="motionTrace" d="M232 544H475" fill="none" stroke="#3ea6ff" stroke-width="3" stroke-linecap="round" opacity="0" />
+              <path id="jogTrace" d="M534 535H516" fill="none" stroke="#2ed7d0" stroke-width="3" stroke-dasharray="5 4" opacity="0" />
+              <text x="290" y="558" id="sceneCaption" fill="#7294a5" font-size="9">Ready: axes homed, safety chain healthy.</text>
+
+              <!-- Dynamic signal dots -->
+              <circle id="commandPulse" class="signal-dot" cx="148" cy="67" r="5" fill="#3ea6ff" />
+              <circle id="feedbackPulse" class="signal-dot" cx="373" cy="155" r="5" fill="#49dd91" />
+              <circle id="alarmPulse" class="signal-dot" cx="560" cy="420" r="6" fill="#ff5364" />
+            </svg>
+            <div class="legend">
+              <span><i style="background:#3ea6ff"></i>运动命令</span>
+              <span><i style="background:#49dd91"></i>正常反馈</span>
+              <span><i style="background:#ffad42"></i>软限位警告</span>
+              <span><i style="background:#ff5364"></i>硬限位 / 伺服报警</span>
+              <span><i style="border:1px dashed #2e6e92;background:transparent"></i>软件安全边界</span>
+            </div>
+          </div>
+          <div class="scene-notes">
+            <div class="note-card"><b>软限位 ≠ 实体开关</b>上位机在发送 MoveAbs 前做坐标范围判断，越界时平台根本不动。</div>
+            <div class="note-card"><b>硬限位 = 最后物理防线</b>实体输入已被压住，真实机械进入边界，必须停机并人工恢复。</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="column debug-column">
+        <div class="column-head">
+          <h2>上位机报警诊断与恢复调试视图</h2>
+          <span>DIAGNOSTICS / RECOVERY</span>
+        </div>
+        <div class="column-body">
+          <div class="debug-grid">
+            <article class="tech-card" id="commandCard">
+              <div class="card-title">当前运动命令卡 <span class="tag">Motion API</span></div>
+              <div class="kv-grid" id="commandKv"></div>
+            </article>
+
+            <article class="tech-card" id="stateCard">
+              <div class="card-title">当前状态卡 <span class="tag">State Machine</span></div>
+              <div class="kv-grid" id="stateKv"></div>
+            </article>
+
+            <article class="tech-card full">
+              <div class="card-title">X / Y / Z 轴状态表 <span class="tag">Realtime Snapshot</span></div>
+              <div class="axis-table-wrap">
+                <table class="axis-table">
+                  <thead><tr><th>Axis</th><th>Current</th><th>Target</th><th>Servo</th><th>Home</th><th>MotionDone</th><th>SoftLimit</th><th>HardLimit</th><th>FollowErr</th><th>ServoAlarm</th><th>CommandAllowed</th></tr></thead>
+                  <tbody id="axisTableBody"></tbody>
+                </table>
+              </div>
+            </article>
+
+            <article class="tech-card" id="softLimitCard">
+              <div class="card-title">软限位配置 <span class="tag">Software Boundary</span></div>
+              <div class="kv-grid" id="softLimitKv"></div>
+              <div id="softLimitMessage" class="alarm-copy" style="margin-top:7px"></div>
+            </article>
+
+            <article class="tech-card" id="hardLimitCard">
+              <div class="card-title">硬限位输入状态 <span class="tag">Digital Input</span></div>
+              <div class="limit-list" id="hardLimitList"></div>
+            </article>
+
+            <article class="tech-card full">
+              <div class="card-title">位置趋势 &amp; 跟随误差曲线 <span class="tag">Feedback Monitor</span></div>
+              <div class="chart-pair">
+                <div class="chart-box">
+                  <div class="chart-label">X Feedback Position / mm</div><div class="chart-value" id="positionChartValue">80.00</div>
+                  <svg viewBox="0 0 300 100" preserveAspectRatio="none">
+                    <path d="M0 80H300M0 55H300M0 30H300" stroke="#183748" stroke-width="1" stroke-dasharray="3 4" />
+                    <polyline id="positionCurve" points="0,76" fill="none" stroke="#3ea6ff" stroke-width="2.5" vector-effect="non-scaling-stroke" />
+                    <line id="positionLimitLine" x1="0" y1="12" x2="300" y2="12" stroke="#ff5364" stroke-width="1" stroke-dasharray="5 4" opacity=".65" />
+                  </svg>
+                </div>
+                <div class="chart-box">
+                  <div class="chart-label">Following Error / mm</div><div class="chart-value" id="errorChartValue">0.03</div>
+                  <svg viewBox="0 0 300 100" preserveAspectRatio="none">
+                    <path d="M0 80H300M0 55H300M0 30H300" stroke="#183748" stroke-width="1" stroke-dasharray="3 4" />
+                    <polyline id="errorCurve" points="0,80" fill="none" stroke="#2ed7d0" stroke-width="2.5" vector-effect="non-scaling-stroke" />
+                    <line x1="0" y1="25" x2="300" y2="25" stroke="#ff5364" stroke-width="1" stroke-dasharray="5 4" opacity=".65" />
+                  </svg>
+                </div>
+              </div>
+            </article>
+
+            <article class="tech-card">
+              <div class="card-title">安全互锁 Checklist <span class="tag">Before Move</span></div>
+              <div class="checklist" id="safetyChecklist"></div>
+            </article>
+
+            <article class="tech-card" id="servoStatusCard">
+              <div class="card-title">伺服驱动器状态 <span class="tag">X Drive</span></div>
+              <div class="kv-grid" id="servoKv"></div>
+            </article>
+
+            <article class="tech-card full" id="alarmDetailCard">
+              <div class="card-title">报警详情卡 <span class="tag">Alarm Parser</span></div>
+              <div id="alarmDetailContent"></div>
+            </article>
+
+            <article class="tech-card full" id="recoveryCard">
+              <div class="card-title">恢复步骤 Checklist <span class="tag">Controlled Recovery</span></div>
+              <div class="checklist" id="recoveryChecklist"></div>
+            </article>
+
+            <article class="tech-card" id="finalCard">
+              <div class="card-title">最终恢复结果 <span class="tag">Result</span></div>
+              <div class="final-result" id="finalResult">
+                <div class="result-icon">○</div>
+                <div><h4>Waiting for recovery</h4><p>所有安全条件满足后，才能返回 Ready。</p></div>
+              </div>
+            </article>
+
+            <article class="tech-card">
+              <div class="card-title">数据库 / MES / 日志 <span class="tag">Traceability</span></div>
+              <div class="log-window" id="logWindow"></div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="column flow-column">
+        <div class="column-head">
+          <h2>伺服报警与限位恢复业务闭环</h2>
+          <span>CLICK ANY NODE</span>
+        </div>
+        <div class="column-body">
+          <div class="flow-map" id="flowMap"></div>
+        </div>
+      </section>
+    </section>
+
+    <section class="detail-panel" id="detailPanel">
+      <div class="detail-head">
+        <div><h2 id="detailTitle">设备 Ready</h2><p>点击右侧任一流程节点，查看该节点的工程含义与面试表达。</p></div>
+        <span class="detail-node-id" id="detailNodeId">NODE 01 · Ready</span>
+      </div>
+      <div class="detail-grid" id="detailGrid"></div>
+    </section>
+
+    <div class="footer-note">单文件工业技术动画 · HTML + CSS + JavaScript + SVG + GSAP · 数据均为教学演示值</div>
+  </main>
+
+  <script>
+    // -------------------------
+    // 1. 数据模型与流程节点
+    // -------------------------
+    const flowNodes = [
+      {
+        id: "ready", title: "设备 Ready", shortLabel: "Ready", group: "common",
+        businessPurpose: "设备处于安全待机状态：伺服已使能、回原点完成、没有未清除报警，可以接收自动运动任务。",
+        input: "ServoOn、HomeDone、AlarmClear、SafetyDoorClosed、EmergencyStopReleased、AxisInSafePosition。",
+        output: "Ready = true，运动许可建立，允许接收目标点。",
+        technologies: ["设备状态机", "安全互锁聚合", "轴状态读取", "报警清除判断"],
+        abnormalCases: ["伺服未使能", "轴未回零", "急停未释放", "历史报警未清", "轴不在安全位"],
+        relation: "Ready 是自动运动的前置状态；没有 Ready，MoveAbs 必须被拒绝。",
+        interviewEnglish: "Ready means the machine is safe and prepared for the next motion command."
+      },
+      {
+        id: "receive", title: "接收运动目标点", shortLabel: "Receive Target", group: "common",
+        businessPurpose: "上位机从配方、工艺流程或视觉补偿结果中获得目标位置，并形成一次可追踪的运动请求。",
+        input: "targetPosition、recipePoint、visionOffset、axisCommandId、currentPosition。",
+        output: "MoveRequest：轴号、目标位置、速度、加速度与命令编号。",
+        technologies: ["点位配方", "视觉补偿", "坐标转换", "运动命令封装"],
+        abnormalCases: ["目标点为空", "配方错误", "视觉补偿过大", "mm 与 pulse 单位混淆"],
+        relation: "把业务动作“去检测位”转换为可校验的真实轴坐标。",
+        interviewEnglish: "This step converts a business target into a real axis motion request."
+      },
+      {
+        id: "precheck", title: "运动前安全检查", shortLabel: "Safety Pre-check", group: "common",
+        businessPurpose: "在发送运动命令前，检查急停、门禁、伺服报警、限位输入和回零状态，生成统一运动许可。",
+        input: "EmergencyStop、DoorClosed、ServoAlarm、LimitStatus、HomeDone、SoftLimitConfig。",
+        output: "CommandAllowed = true / false。",
+        technologies: ["启动前互锁", "安全状态聚合", "状态机防护", "运动许可判断"],
+        abnormalCases: ["急停触发", "安全门打开", "当前已在限位", "伺服报警未清", "未回零"],
+        relation: "位于目标点生成后、MoveAbs 前，避免危险请求进入运动控制卡。",
+        interviewEnglish: "The software checks safety conditions before sending the motion command."
+      },
+      {
+        id: "softcheck", title: "软限位判断", shortLabel: "Soft Limit?", group: "common",
+        businessPurpose: "使用软件配置的最小/最大范围判断目标坐标是否合法。",
+        input: "targetPosition、softLimitMin、softLimitMax、axisNo。",
+        output: "SoftLimitOK 或 SoftLimitExceeded。",
+        technologies: ["软限位", "运动前校验", "坐标边界判断", "点位合法性"],
+        abnormalCases: ["目标超过最大值", "目标低于最小值", "配置写错", "坐标单位换算错误"],
+        relation: "软件第一道保护，应在实体硬限位动作前拦截错误点位。",
+        interviewEnglish: "Software limits reject unsafe target positions before the machine starts moving."
+      },
+      {
+        id: "softblock", title: "软限位拦截", shortLabel: "Command Blocked", group: "soft",
+        businessPurpose: "目标越界时拒绝发送命令，机器保持原位，只产生可解释的业务提示。",
+        input: "SoftLimitExceeded、targetPosition、softLimitRange。",
+        output: "CommandRejected；平台不运动。",
+        technologies: ["命令拦截", "配方校验", "UI 警告", "非破坏性保护"],
+        abnormalCases: ["操作员忽略提示", "同一错误点重复下发", "软限位范围配置不合理"],
+        relation: "这是非破坏性安全分支，不会像硬限位那样产生真实机械碰撞。",
+        interviewEnglish: "The command is blocked in software, so the real machine does not move into danger."
+      },
+      {
+        id: "modify", title: "提示修改点位或配方", shortLabel: "Correct Recipe", group: "soft",
+        businessPurpose: "引导操作员检查目标点、视觉补偿量或配方参数，避免重复越界。",
+        input: "RejectedCommand、targetPosition、recipeId、visionOffset。",
+        output: "OperatorNotice；等待修正并重新进入 Ready。",
+        technologies: ["报警提示", "配方管理", "参数校验", "人工确认"],
+        abnormalCases: ["错误配方未修改", "视觉补偿持续异常", "操作员误确认"],
+        relation: "修正业务输入后回到 Ready，重新走完整安全检查。",
+        interviewEnglish: "The operator must correct the recipe or target point before trying again."
+      },
+      {
+        id: "send", title: "发送 MoveAbs 运动命令", shortLabel: "MoveAbs", group: "common",
+        businessPurpose: "目标合法且安全条件满足后，通过运动控制模块发送 X 轴绝对位置运动命令。",
+        input: "AxisNo、targetPosition、velocity、acceleration、axisCommandId。",
+        output: "MoveAbs command sent to Motion Card。",
+        technologies: ["运动控制卡 SDK", "绝对运动", "速度/加速度参数", "命令封装"],
+        abnormalCases: ["SDK 调用失败", "控制卡断线", "轴未使能", "参数非法"],
+        relation: "这是软件决策进入真实机械运动的关键边界。",
+        interviewEnglish: "The PC sends an absolute move command to the motion controller."
+      },
+      {
+        id: "moving", title: "轴开始运动", shortLabel: "Axis Moving", group: "common",
+        businessPurpose: "运动控制卡输出轨迹给伺服驱动器，电机带动 X 平台向目标位置运动。",
+        input: "MoveAbs command、servoReady、motionProfile。",
+        output: "AxisMoving；反馈位置持续变化。",
+        technologies: ["位置模式", "伺服闭环", "加减速曲线", "轨迹规划"],
+        abnormalCases: ["电机不动", "机械卡滞", "负载过大", "速度过高", "跟随误差上升"],
+        relation: "把数字命令转化为真实机械动作，监控必须同步启动。",
+        interviewEnglish: "The axis starts moving under the control of the motion card and servo drive."
+      },
+      {
+        id: "monitor", title: "实时监控轴状态", shortLabel: "Monitor Feedback", group: "common",
+        businessPurpose: "运动中持续采集当前位置、到位信号、限位、伺服报警与跟随误差。",
+        input: "CurrentPosition、MotionDone、LimitInput、ServoAlarm、FollowingError、DriveStatus。",
+        output: "AxisStatusSnapshot，供状态机判断继续、停止或报警。",
+        technologies: ["周期轮询/事件回调", "限位输入", "伺服状态字", "跟随误差监控"],
+        abnormalCases: ["通信中断", "状态刷新过慢", "限位抖动", "跟随误差突增"],
+        relation: "与真实运动并行，是异常能被及时发现的核心。",
+        interviewEnglish: "The software monitors feedback while the axis is moving."
+      },
+      {
+        id: "hazard", title: "硬限位或伺服报警判断", shortLabel: "Motion Unsafe?", group: "alarm",
+        businessPurpose: "聚合硬限位、驱动器报警、跟随误差和急停，判断运动是否仍可信且安全。",
+        input: "HardLimitInput、ServoAlarmCode、FollowingError、EmergencyStop、AxisStatus。",
+        output: "MotionSafe 或 MotionUnsafe。",
+        technologies: ["硬限位 DI", "伺服报警码", "异常阈值", "急停状态聚合"],
+        abnormalCases: ["X+ Limit ON", "驱动器过载", "跟随误差超限", "急停按下"],
+        relation: "一旦 MotionUnsafe，StopAllAxes 的优先级高于所有工艺动作。",
+        interviewEnglish: "If a limit or servo alarm appears, the motion is no longer safe."
+      },
+      {
+        id: "inposition", title: "到位确认", shortLabel: "In Position", group: "normal",
+        businessPurpose: "无异常时确认反馈位置到达目标，且误差、到位信号和超时均满足条件。",
+        input: "CommandPosition、FeedbackPosition、MotionDone、InPosition、PositionTolerance。",
+        output: "InPosition = true。",
+        technologies: ["到位判断", "反馈位置", "位置容差", "运动超时"],
+        abnormalCases: ["到位信号异常", "位置误差过大", "到位超时", "机械振动"],
+        relation: "正常运动分支的结束；确认后才能继续相机或下料动作。",
+        interviewEnglish: "The software confirms the axis really reached the target position."
+      },
+      {
+        id: "continue", title: "继续自动流程", shortLabel: "Auto Continue", group: "normal",
+        businessPurpose: "安全到位后继续相机检测、OK/NG 下料或下一工艺步骤。",
+        input: "InPosition、NoAlarm、BusinessStep。",
+        output: "AutoProcessContinues。",
+        technologies: ["工艺状态机", "动作编排", "IO 条件", "业务闭环"],
+        abnormalCases: ["相机检测失败", "后续 IO 不满足", "下一个点位异常"],
+        relation: "正常分支并不取消异常监控，报警流程始终可随时接管。",
+        interviewEnglish: "After a safe move, the machine continues the normal production flow."
+      },
+      {
+        id: "stop", title: "立即停止运动", shortLabel: "StopAllAxes", group: "alarm",
+        businessPurpose: "检测到硬限位或伺服报警后，立即停止相关轴或所有轴，防止危险扩大。",
+        input: "MotionUnsafe、LimitTriggered、ServoAlarm、axisCommandId。",
+        output: "StopAllAxes()；轴停止确认。",
+        technologies: ["减速/立即停止", "StopAllAxes", "停止状态确认", "多轴协调"],
+        abnormalCases: ["停止命令失败", "惯性滑动", "联动轴未同步停止", "控制卡通信异常"],
+        relation: "报警分支第一步，优先级高于检测、夹紧、下料等业务动作。",
+        interviewEnglish: "The system stops motion immediately when the axis becomes unsafe."
+      },
+      {
+        id: "outputs", title: "关闭危险输出", shortLabel: "Safe Outputs Off", group: "alarm",
+        businessPurpose: "关闭夹紧、点胶阀、气缸或加工输出，防止轴停了但其他执行器仍造成风险。",
+        input: "AlarmState、DangerousOutputStatus、ValveOutput、CylinderOutput。",
+        output: "DangerousOutputsOff。",
+        technologies: ["DO 输出控制", "异常态输出策略", "IO 安全互锁", "设备保护"],
+        abnormalCases: ["输出关闭失败", "气缸停中间位", "阀门未关", "IO 模块无响应"],
+        relation: "轴停止后立即执行，为人工接近与后续恢复建立安全现场。",
+        interviewEnglish: "Dangerous outputs are turned off after the motion alarm is detected."
+      },
+      {
+        id: "alarm", title: "进入 Alarm 状态", shortLabel: "Alarm State", group: "alarm",
+        businessPurpose: "上位机状态机进入锁存 Alarm，禁止自动启动，等待有权限的人工处理。",
+        input: "AlarmCode、AxisStatus、StopDone、DangerousOutputsOff。",
+        output: "motionState = Alarm；AutoRunLocked = true。",
+        technologies: ["报警状态机", "报警锁存", "自动模式禁止", "报警记录"],
+        abnormalCases: ["报警未锁存", "用户误启动", "多个报警叠加", "状态切换竞态"],
+        relation: "Alarm 是正常生产与恢复操作之间的隔离区。",
+        interviewEnglish: "The machine enters Alarm state and automatic motion is locked."
+      },
+      {
+        id: "explain", title: "显示原因并锁定自动模式", shortLabel: "Alarm Guidance", group: "alarm",
+        businessPurpose: "HMI 将底层报警码转换为报警轴、原因和明确恢复建议，并锁定自动模式。",
+        input: "alarmId、alarmType、axis、alarmCode、currentPosition、limitState。",
+        output: "AlarmMessage、OperatorGuide、AutoModeLocked。",
+        technologies: ["报警码解析", "HMI 引导", "日志追踪", "权限控制"],
+        abnormalCases: ["报警码映射缺失", "提示过于模糊", "操作员不知道处理顺序"],
+        relation: "把控制器/驱动器语言转换为现场可执行的恢复信息。",
+        interviewEnglish: "The HMI explains the alarm and prevents the operator from restarting automatically."
+      },
+      {
+        id: "inspect", title: "人工检查现场", shortLabel: "Operator Check", group: "recovery",
+        businessPurpose: "操作员检查撞机、卡料、线缆干涉和限位开关受压，确认机器适合恢复运动。",
+        input: "AlarmMessage、MachinePosition、OperatorConfirm。",
+        output: "MachineSafeForRecovery。",
+        technologies: ["人工确认", "安全恢复 SOP", "设备点检", "权限确认"],
+        abnormalCases: ["卡料未清", "机构仍危险", "急停未释放", "操作员误确认"],
+        relation: "真实故障不能只靠软件按钮消失；现场安全确认必须先于恢复运动。",
+        interviewEnglish: "The operator checks the real machine before any recovery movement."
+      },
+      {
+        id: "jog", title: "低速手动退限位", shortLabel: "Jog Away", group: "recovery",
+        businessPurpose: "手动模式下按住低速 Jog，使 X 轴沿允许方向离开 X+ 限位开关。",
+        input: "ManualMode、JogDirection、LowSpeed、LimitStatus、OperatorHoldButton。",
+        output: "AxisAwayFromLimit；X+ Limit = OFF。",
+        technologies: ["低速 Jog", "仅允许退让方向", "按住运行", "限位退让逻辑"],
+        abnormalCases: ["Jog 方向错误", "仍压住开关", "伺服无法使能", "机械卡死"],
+        relation: "限位输入解除是复位伺服和恢复坐标的必要条件。",
+        interviewEnglish: "The axis is jogged slowly away from the limit switch before resetting the alarm."
+      },
+      {
+        id: "reset", title: "复位伺服报警", shortLabel: "Servo Reset", group: "recovery",
+        businessPurpose: "限位解除且现场安全后，向 X 驱动器发送报警复位并读取状态确认。",
+        input: "LimitOff、OperatorConfirm、ServoAlarmCode、ResetCommand。",
+        output: "ServoAlarmCleared 或 ResetFailed。",
+        technologies: ["驱动器报警复位", "报警码清除", "状态字确认", "复位超时"],
+        abnormalCases: ["故障未解除", "复位失败", "仍然过载", "需要重新上电"],
+        relation: "只有底层故障真实消失，轴才可能重新进入可控状态。",
+        interviewEnglish: "The servo alarm can be reset only after the real fault condition is removed."
+      },
+      {
+        id: "home", title: "重新回原点", shortLabel: "Re-home", group: "recovery",
+        businessPurpose: "报警停机或驱动器复位后位置可能不可信，通过 Home Sensor 重新建立机器坐标。",
+        input: "HomeCommand、HomeSensor、HomeSpeed、LimitStatus、ServoReady。",
+        output: "HomeDone = true；机器坐标重新可信。",
+        technologies: ["回原点", "低速搜索", "坐标清零", "回零超时"],
+        abnormalCases: ["找不到原点", "方向错误", "再次碰限位", "Home 信号异常"],
+        relation: "从“能动”恢复为“知道自己在哪里”，是返回自动模式的关键。",
+        interviewEnglish: "After a serious alarm, homing rebuilds a trusted machine coordinate system."
+      },
+      {
+        id: "recover", title: "清除报警并恢复 Ready", shortLabel: "Recovered / Ready", group: "recovery",
+        businessPurpose: "聚合限位 OFF、伺服正常、HomeDone、安全链正常与人工复位，清除上位机报警。",
+        input: "ServoAlarmClear、LimitOff、HomeDone、SafetyOK、OperatorReset。",
+        output: "AlarmClear；motionState = Ready。",
+        technologies: ["恢复条件聚合", "状态机恢复", "报警清除", "恢复审计日志"],
+        abnormalCases: ["报警未真清除", "轴未回零", "急停未释放", "条件不完整"],
+        relation: "报警恢复终点，也是下一次安全自动生产的起点。",
+        interviewEnglish: "The machine returns to Ready only after all recovery conditions are satisfied."
+      }
+    ];
+
+    const recoverySteps = [
+      "Stop all axes",
+      "Valve / Clamp dangerous output off",
+      "Operator confirm machine safe",
+      "Jog X axis away from limit",
+      "Check X+ Limit OFF",
+      "Reset servo alarm",
+      "Re-home X / Y / Z",
+      "Clear alarm",
+      "Return Ready"
+    ];
+
+    const safetyItems = ["Emergency Stop released", "Safety door closed", "Servo alarm clear", "Home done", "No hard limit active"];
+
+    const scenarioDefinitions = {
+      hard: { label: "Hard Limit Alarm", className: "", target: 260 },
+      soft: { label: "Soft Limit Block", className: "soft", target: 340 },
+      normal: { label: "Normal Move", className: "normal", target: 260 }
+    };
+
+    const baseState = () => ({
+      workpieceId: "WP-LIMIT-001",
+      axisCommandId: "CMD-MOVE-X-001",
+      alarmId: null,
+      recoveryId: "REC-X-LIMIT-001",
+      motionState: "Ready",
+      axisState: "Ready",
+      limitState: "Normal",
+      recoveryState: "NotRequired",
+      currentPosition: 80,
+      targetPosition: scenarioDefinitions[scenario].target,
+      velocity: 120,
+      acceleration: 500,
+      followingError: 0.03,
+      hardLimitOn: false,
+      servoAlarm: false,
+      servoAlarmType: "",
+      servoAlarmCode: "—",
+      homeDone: true,
+      motionDone: true,
+      commandAllowed: true,
+      dangerousOutputs: true,
+      autoRunLocked: false,
+      operatorSafe: false,
+      recoveryCompleted: 0,
+      safetyPassed: 0,
+      commandType: "Idle",
+      alarmCause: "",
+      actionRequired: "",
+      finalRecovered: false,
+      positionHistory: [80],
+      errorHistory: [0.03]
+    });
+
+    let scenario = "hard";
+    let state;
+    let animationSteps = [];
+    let currentStepIndex = 0;
+    let activeNodeId = "ready";
+    let selectedNodeId = "ready";
+    let masterTimeline;
+    let injectionTimeline;
+    let isPlaying = false;
+    let logs = [];
+
+    // -------------------------
+    // 2. 分镜数据
+    // -------------------------
+    function makeSteps() {
+      const commonStart = [
+        { nodeId: "ready", duration: 2.2, description: "设备安全待机：三轴 Servo ON、Home DONE、安全链健康。", log: "Machine is ready for motion." },
+        { nodeId: "receive", duration: 2.2, description: scenario === "soft" ? "接收目标点 X = 340 mm：它已经落在软件允许范围之外。" : "接收目标点 X = 260 mm，生成可追踪的 MoveRequest。", log: "Move request received." },
+        { nodeId: "precheck", duration: 2.4, description: "依次扫描急停、门禁、伺服、Home 与限位状态，运动许可通过。", log: "Safety pre-check passed." },
+        { nodeId: "softcheck", duration: 2.3, description: scenario === "soft" ? "比较目标 340 mm 与软限位最大值 300 mm：越界。" : "比较目标位置与 X 轴 0 ~ 300 mm 软件安全范围：合法。", log: scenario === "soft" ? "Soft limit exceeded." : "Soft limit check passed." }
+      ];
+
+      if (scenario === "soft") {
+        return commonStart.concat([
+          { nodeId: "softblock", duration: 2.7, description: "上位机拒绝命令；目标标记越界，但真实平台保持在 80 mm。", log: "Target exceeds software limit. Command rejected." },
+          { nodeId: "modify", duration: 2.6, description: "操作员需要修正配方或视觉补偿，再从 Ready 重新执行安全检查。", log: "Operator must correct recipe or target point." },
+          { nodeId: "ready", duration: 2.2, description: "软限位分支结束：机器未运动，修正参数后回到 Ready。", log: "Machine remains safe and returns to Ready." }
+        ]);
+      }
+
+      const moving = [
+        { nodeId: "send", duration: 2.5, description: "蓝色命令 token 从 IPC 经过 Motion Card 到 X Servo Drive。", log: "MoveAbs command sent." },
+        { nodeId: "moving", duration: 3.2, description: "X 平台沿导轨加速运动，反馈位置与位置趋势同步变化。", log: "X axis moving." },
+        { nodeId: "monitor", duration: 2.8, description: "上位机持续读取位置、限位、ServoAlarm 与 FollowingError。", log: "Monitoring position, limit and servo status." }
+      ];
+
+      if (scenario === "normal") {
+        return commonStart.concat(moving, [
+          { nodeId: "inposition", duration: 2.6, description: "反馈位置到达 260 mm，MotionDone = true，误差小于容差。", log: "Axis reached target position." },
+          { nodeId: "continue", duration: 2.7, description: "无报警且安全到位，设备继续相机检测与自动下料流程。", log: "Automatic process continues." }
+        ]);
+      }
+
+      return commonStart.concat(moving, [
+        { nodeId: "hazard", duration: 3.1, description: "异常使 X 轴继续越界，压到 X+ 实体限位；驱动器报警、跟随误差突升。", log: "X positive hard limit triggered. Servo alarm detected." },
+        { nodeId: "stop", duration: 2.3, description: "状态机抢占正常流程，立即执行 StopAllAxes()。", log: "Stop all axes." },
+        { nodeId: "outputs", duration: 2.2, description: "轴停止后关闭夹具、阀与其他危险输出，建立安全现场。", log: "Dangerous outputs turned off." },
+        { nodeId: "alarm", duration: 2.4, description: "上位机进入锁存 Alarm，AutoRunLocked = true。", log: "Machine entered Alarm state." },
+        { nodeId: "explain", duration: 2.8, description: "HMI 显示报警轴、原因和恢复顺序；自动模式保持锁定。", log: "Auto mode locked. Operator action required." },
+        { nodeId: "inspect", duration: 2.6, description: "操作员检查卡料、碰撞、线缆和限位开关，确认可安全恢复。", log: "Operator confirmed machine is safe." },
+        { nodeId: "jog", duration: 3.1, description: "手动低速 JogMinus：X 从 304 mm 退到 292 mm，X+ Limit 由 ON 变 OFF。", log: "Jog X axis away from positive limit. X+ limit is OFF." },
+        { nodeId: "reset", duration: 2.6, description: "故障条件解除后复位 X Servo，驱动器从 ALARM 回到 SERVO ON。", log: "Servo alarm reset." },
+        { nodeId: "home", duration: 3.4, description: "X/Y/Z 低速重新寻找 Home Sensor，清零并重建可信机器坐标。", log: "Re-home axes after limit alarm. Home done." },
+        { nodeId: "recover", duration: 2.8, description: "限位、伺服、Home 与安全链全部满足，清除报警并恢复 Ready。", log: "Alarm cleared. Machine returned to Ready." }
+      ]);
+    }
+
+    // -------------------------
+    // 3. 流程与详情渲染
+    // -------------------------
+    function renderFlowNodes() {
+      const map = document.getElementById("flowMap");
+      const sectionLabels = {
+        common: "主流程 / Normal motion & monitoring",
+        soft: "软件保护分支 / Soft limit blocked",
+        normal: "正常到位分支 / In position",
+        alarm: "报警停机分支 / Alarm shutdown",
+        recovery: "受控恢复分支 / Controlled recovery"
+      };
+      let lastGroup = "";
+      map.innerHTML = flowNodes.map((node, index) => {
+        const section = node.group !== lastGroup ? `<div class="flow-section-title">${sectionLabels[node.group]}</div>` : "";
+        lastGroup = node.group;
+        return `${section}<button class="flow-node ${node.group}" id="flow-${node.id}" data-node-id="${node.id}" onclick="selectNode('${node.id}')">
+          <span class="node-no">${String(index + 1).padStart(2, "0")}</span>
+          <span><span class="node-title">${node.title}</span><span class="node-short">${node.shortLabel}</span></span>
+          <span class="node-state">WAIT</span>
+        </button>`;
+      }).join("");
+      updateFlowHighlight();
+    }
+
+    // 点击流程节点只切换技术详情，不改变机器状态。
+    function selectNode(nodeId) {
+      selectedNodeId = nodeId;
+      const node = flowNodes.find(item => item.id === nodeId);
+      if (!node) return;
+      document.querySelectorAll(".flow-node").forEach(el => el.classList.toggle("selected", el.dataset.nodeId === nodeId));
+      document.getElementById("detailTitle").textContent = node.title;
+      document.getElementById("detailNodeId").textContent = `NODE ${String(flowNodes.indexOf(node) + 1).padStart(2, "0")} · ${node.shortLabel}`;
+      document.getElementById("detailGrid").innerHTML = `
+        <article class="detail-item"><h3>业务作用</h3><p>${node.businessPurpose}</p></article>
+        <article class="detail-item"><h3>输入</h3><p>${node.input}</p></article>
+        <article class="detail-item"><h3>输出</h3><p>${node.output}</p></article>
+        <article class="detail-item"><h3>关键技术</h3><ul>${node.technologies.map(x => `<li>${x}</li>`).join("")}</ul></article>
+        <article class="detail-item"><h3>异常 / 判断条件</h3><ul>${node.abnormalCases.map(x => `<li>${x}</li>`).join("")}</ul></article>
+        <article class="detail-item" style="grid-column: span 3"><h3>与前后节点的关系</h3><p>${node.relation}</p></article>
+        <article class="detail-item interview"><h3>Simple Technical English</h3><p>${node.interviewEnglish}</p></article>`;
+    }
+
+    function updateFlowHighlight() {
+      const pathNodeIds = animationSteps.map(step => step.nodeId);
+      const currentOccurrence = currentStepIndex;
+      document.querySelectorAll(".flow-node").forEach(el => {
+        const id = el.dataset.nodeId;
+        const active = id === activeNodeId;
+        const occurrenceIndex = pathNodeIds.indexOf(id);
+        el.classList.toggle("active", active);
+        el.classList.toggle("selected", id === selectedNodeId);
+        el.classList.toggle("completed", occurrenceIndex >= 0 && occurrenceIndex < currentOccurrence && !active);
+        const stateEl = el.querySelector(".node-state");
+        stateEl.textContent = active ? "ACTIVE" : (occurrenceIndex >= 0 && occurrenceIndex < currentOccurrence ? "DONE" : "WAIT");
+        el.querySelectorAll(".flow-token").forEach(token => token.remove());
+        if (active) {
+          const token = document.createElement("span");
+          token.className = "flow-token";
+          token.textContent = ["hazard","stop","outputs","alarm","explain","inspect","jog","reset","home","recover"].includes(id) && state.alarmId ? state.alarmId : state.axisCommandId;
+          el.appendChild(token);
+          requestAnimationFrame(() => el.scrollIntoView({ behavior: "smooth", block: "nearest" }));
+        }
+      });
+    }
+
+    // -------------------------
+    // 4. 状态推进与统一刷新
+    // -------------------------
+    function resetState() {
+      state = baseState();
+      logs = [];
+      currentStepIndex = 0;
+      activeNodeId = "ready";
+      selectedNodeId = "ready";
+      gsap.killTweensOf(["#xCarriage", "#commandPulse", "#feedbackPulse", "#alarmPulse", "#homeSensor"]);
+      gsap.set("#xCarriage", { x: 0 });
+    }
+
+    function rememberTelemetry() {
+      state.positionHistory.push(Number(state.currentPosition.toFixed(2)));
+      state.errorHistory.push(Number(state.followingError.toFixed(3)));
+      if (state.positionHistory.length > 28) state.positionHistory.shift();
+      if (state.errorHistory.length > 28) state.errorHistory.shift();
+    }
+
+    function applyNodeState(nodeId) {
+      const target = scenarioDefinitions[scenario].target;
+      state.targetPosition = target;
+
+      switch (nodeId) {
+        case "ready":
+          state.motionState = "Ready";
+          state.axisState = "Ready";
+          state.limitState = "Normal";
+          state.recoveryState = state.finalRecovered ? "RecoveryDone" : "NotRequired";
+          state.commandType = "Idle";
+          state.commandAllowed = true;
+          state.motionDone = true;
+          state.safetyPassed = 0;
+          if (scenario === "soft") state.currentPosition = 80;
+          break;
+        case "receive":
+          state.motionState = "Ready";
+          state.commandType = `MoveAbs(X, ${target.toFixed(0)})`;
+          state.motionDone = false;
+          break;
+        case "precheck":
+          state.motionState = "SafetyChecking";
+          state.safetyPassed = safetyItems.length;
+          state.commandAllowed = true;
+          break;
+        case "softcheck":
+          state.limitState = scenario === "soft" ? "SoftLimitExceeded" : "Normal";
+          state.commandAllowed = scenario !== "soft";
+          break;
+        case "softblock":
+          state.motionState = "SoftLimitBlocked";
+          state.axisState = "Ready";
+          state.limitState = "SoftLimitExceeded";
+          state.commandType = "CommandRejected";
+          state.commandAllowed = false;
+          state.currentPosition = 80;
+          state.followingError = 0;
+          animateSoftBlockPulse();
+          break;
+        case "modify":
+          state.motionState = "SoftLimitBlocked";
+          state.commandType = "Waiting recipe correction";
+          break;
+        case "send":
+          state.motionState = "Moving";
+          state.axisState = "ServoOn";
+          state.commandType = `MoveAbs(X, ${target.toFixed(0)})`;
+          state.motionDone = false;
+          state.commandAllowed = true;
+          state.followingError = 0.04;
+          animateCommandPulse("blue");
+          break;
+        case "moving":
+          state.motionState = "Moving";
+          state.axisState = "Moving";
+          state.currentPosition = scenario === "hard" ? 238 : 225;
+          state.followingError = 0.08;
+          state.motionDone = false;
+          break;
+        case "monitor":
+          state.motionState = "Monitoring";
+          state.axisState = "Moving";
+          state.currentPosition = scenario === "hard" ? 286 : 251;
+          state.followingError = 0.11;
+          animateFeedbackPulse();
+          break;
+        case "inposition":
+          state.motionState = "InPosition";
+          state.axisState = "Ready";
+          state.currentPosition = target;
+          state.followingError = 0.02;
+          state.motionDone = true;
+          break;
+        case "continue":
+          state.motionState = "Ready";
+          state.axisState = "Ready";
+          state.commandType = "AutoProcess: Camera Inspect";
+          state.motionDone = true;
+          break;
+        case "hazard":
+          state.motionState = "LimitTriggered";
+          state.axisState = "Alarm";
+          state.limitState = "HardLimitTriggered";
+          state.recoveryState = "WaitingOperator";
+          state.currentPosition = 304;
+          state.followingError = 1.82;
+          state.hardLimitOn = true;
+          state.servoAlarm = true;
+          state.servoAlarmType = "Positive Limit Triggered";
+          state.servoAlarmCode = "0x2310 / LIMIT+";
+          state.alarmId = "ALM-X-POS-LIMIT-001";
+          state.alarmCause = "X axis reached the positive hard limit during motion.";
+          state.actionRequired = "Stop motion, jog away from limit, reset servo, and re-home axes.";
+          state.commandAllowed = false;
+          state.motionDone = false;
+          state.homeDone = false;
+          animateAlarmSignal();
+          break;
+        case "stop":
+          state.motionState = "Stopping";
+          state.axisState = "Alarm";
+          state.commandType = "StopAllAxes()";
+          state.motionDone = true;
+          state.recoveryCompleted = Math.max(state.recoveryCompleted, 1);
+          break;
+        case "outputs":
+          state.motionState = "SafeOutputOff";
+          state.dangerousOutputs = false;
+          state.recoveryCompleted = Math.max(state.recoveryCompleted, 2);
+          break;
+        case "alarm":
+          state.motionState = "Alarm";
+          state.axisState = "ResetRequired";
+          state.autoRunLocked = true;
+          state.commandAllowed = false;
+          break;
+        case "explain":
+          state.motionState = "Alarm";
+          state.recoveryState = "WaitingOperator";
+          state.autoRunLocked = true;
+          break;
+        case "inspect":
+          state.motionState = "Alarm";
+          state.operatorSafe = true;
+          state.recoveryState = "WaitingOperator";
+          state.recoveryCompleted = Math.max(state.recoveryCompleted, 3);
+          break;
+        case "jog":
+          state.motionState = "ManualJog";
+          state.axisState = "ResetRequired";
+          state.recoveryState = "JogAwayFromLimit";
+          state.commandType = "JogMinus(X, LowSpeed)";
+          state.currentPosition = 292;
+          state.followingError = 0.08;
+          state.hardLimitOn = false;
+          state.limitState = "Normal";
+          state.recoveryCompleted = Math.max(state.recoveryCompleted, 5);
+          break;
+        case "reset":
+          state.motionState = "AlarmReset";
+          state.axisState = "ServoOn";
+          state.recoveryState = "ServoReset";
+          state.commandType = "ServoAlarmReset(X)";
+          state.servoAlarm = false;
+          state.servoAlarmCode = "—";
+          state.followingError = 0.03;
+          state.recoveryCompleted = Math.max(state.recoveryCompleted, 6);
+          break;
+        case "home":
+          state.motionState = "Homing";
+          state.axisState = "ServoOn";
+          state.recoveryState = "RehomeRequired";
+          state.commandType = "Home(X, Y, Z)";
+          state.homeDone = true;
+          state.currentPosition = 0;
+          state.followingError = 0.04;
+          state.recoveryCompleted = Math.max(state.recoveryCompleted, 7);
+          break;
+        case "recover":
+          state.motionState = "Ready";
+          state.axisState = "Ready";
+          state.limitState = "Normal";
+          state.recoveryState = "RecoveryDone";
+          state.commandType = "RecoveryCompleted";
+          state.currentPosition = 80;
+          state.homeDone = true;
+          state.motionDone = true;
+          state.commandAllowed = true;
+          state.autoRunLocked = false;
+          state.dangerousOutputs = true;
+          state.alarmId = null;
+          state.alarmCause = "";
+          state.actionRequired = "";
+          state.finalRecovered = true;
+          state.recoveryCompleted = 9;
+          break;
+      }
+      rememberTelemetry();
+    }
+
+    // 切换一个分镜，统一驱动现场、调试视图、流程、详情与日志。
+    function updateStep(stepIndex, options = {}) {
+      if (!animationSteps.length) return;
+      const index = Math.max(0, Math.min(stepIndex, animationSteps.length - 1));
+      currentStepIndex = index;
+      const step = animationSteps[index];
+      activeNodeId = step.nodeId;
+      selectedNodeId = step.nodeId;
+      applyNodeState(step.nodeId);
+      if (scenario === "soft" && step.nodeId === "ready" && index > 0) {
+        state.targetPosition = 260;
+        state.commandType = "RecipeCorrected / Idle";
+      }
+      updateAllViews(step.description);
+      selectNode(step.nodeId);
+      if (!options.silent) appendLog(step.log, logLevelForNode(step.nodeId));
+    }
+
+    function updateAllViews(description) {
+      document.getElementById("stepIndexLabel").textContent = String(currentStepIndex + 1).padStart(2, "0");
+      if (description) document.getElementById("stepDescription").textContent = description;
+      updateStatusCards();
+      updateAxisTable();
+      updateSoftLimitCard();
+      updateHardLimitInputs();
+      updateAlarmDetail();
+      updateRecoveryChecklist();
+      updatePositionCurve();
+      updateCommandCard();
+      updateSafetyChecklist();
+      updateServoStatus();
+      updateMachineScene(activeNodeId);
+      updateFinalResult();
+      updateFlowHighlight();
+      updateRecoveryButtons();
+    }
+
+    function logLevelForNode(nodeId) {
+      if (["softcheck", "softblock", "modify"].includes(nodeId)) return "WARN";
+      if (["hazard", "stop", "outputs", "alarm", "explain"].includes(nodeId)) return "ALARM";
+      if (["inspect", "jog", "reset", "home", "recover"].includes(nodeId)) return "RECOVERY";
+      return "INFO";
+    }
+
+    // -------------------------
+    // 5. 中间调试视图
+    // -------------------------
+    function updateStatusCards() {
+      document.getElementById("workpieceValue").textContent = state.workpieceId;
+      document.getElementById("commandIdValue").textContent = state.axisCommandId;
+      document.getElementById("alarmIdValue").textContent = state.alarmId || "—";
+      document.getElementById("motionStateValue").textContent = state.motionState;
+      document.getElementById("axisStateValue").textContent = state.axisState;
+      document.getElementById("limitStateValue").textContent = state.limitState;
+      document.getElementById("recoveryStateValue").textContent = state.recoveryState;
+      document.getElementById("xPositionValue").textContent = `${state.currentPosition.toFixed(2)} mm`;
+      document.getElementById("stateKv").innerHTML = [
+        ["motionState", state.motionState, state.motionState === "Alarm" ? "bad" : "ok"],
+        ["axisState", state.axisState, state.servoAlarm ? "bad" : "ok"],
+        ["limitState", state.limitState, state.limitState === "Normal" ? "ok" : (state.limitState === "SoftLimitExceeded" ? "warn" : "bad")],
+        ["recoveryState", state.recoveryState, state.recoveryState === "RecoveryDone" ? "ok" : ""],
+        ["AutoRunLocked", String(state.autoRunLocked), state.autoRunLocked ? "bad" : "ok"],
+        ["DangerousOutputs", state.dangerousOutputs ? "ON" : "OFF", state.dangerousOutputs ? "" : "ok"]
+      ].map(([k,v,c]) => `<div class="kv"><span>${k}</span><span class="${c}">${v}</span></div>`).join("");
+
+      const card = document.getElementById("stateCard");
+      card.classList.toggle("danger", state.motionState === "Alarm" || state.motionState === "LimitTriggered");
+      card.classList.toggle("success", state.motionState === "Ready" && !state.alarmId);
+    }
+
+    function updateCommandCard() {
+      document.getElementById("commandKv").innerHTML = [
+        ["axisCommandId", state.axisCommandId],
+        ["commandType", state.commandType],
+        ["axis", "X"],
+        ["targetPosition", `${state.targetPosition.toFixed(2)} mm`],
+        ["currentPosition", `${state.currentPosition.toFixed(2)} mm`],
+        ["velocity", `${state.velocity.toFixed(2)} mm/s`],
+        ["acceleration", `${state.acceleration.toFixed(2)} mm/s²`],
+        ["softLimit", "0.00 ~ 300.00 mm"]
+      ].map(([k,v]) => `<div class="kv"><span>${k}</span><span>${v}</span></div>`).join("");
+      document.getElementById("commandCard").classList.toggle("danger", state.commandType === "StopAllAxes()");
+      document.getElementById("commandCard").classList.toggle("warning", state.commandType === "CommandRejected");
+    }
+
+    function updateAxisTable() {
+      const axes = [
+        { axis: "X", current: state.currentPosition, target: state.targetPosition, servo: state.servoAlarm ? "ALARM" : "ON", home: state.homeDone ? "DONE" : "LOST", done: state.motionDone, soft: state.limitState === "SoftLimitExceeded" ? "EXCEEDED" : "OK", hard: state.hardLimitOn ? "X+ ON" : "OFF", error: state.followingError, alarm: state.servoAlarm, allowed: state.commandAllowed },
+        { axis: "Y", current: 100, target: 100, servo: "ON", home: "DONE", done: true, soft: "OK", hard: "OFF", error: 0.02, alarm: false, allowed: !state.autoRunLocked },
+        { axis: "Z", current: 35, target: 35, servo: "ON", home: "DONE", done: true, soft: "OK", hard: "OFF", error: 0.01, alarm: false, allowed: !state.autoRunLocked }
+      ];
+      document.getElementById("axisTableBody").innerHTML = axes.map(row => `<tr class="${row.axis === "X" ? "x-row" : ""}">
+        <td>${row.axis}</td><td>${row.current.toFixed(2)}</td><td>${row.target.toFixed(2)}</td>
+        <td class="${row.servo === "ALARM" ? "cell-bad" : "cell-ok"}">${row.servo}</td>
+        <td class="${row.home === "DONE" ? "cell-ok" : "cell-warn"}">${row.home}</td>
+        <td>${row.done ? "TRUE" : "FALSE"}</td>
+        <td class="${row.soft === "OK" ? "cell-ok" : "cell-warn"}">${row.soft}</td>
+        <td class="${row.hard === "OFF" ? "cell-ok" : "cell-bad"}">${row.hard}</td>
+        <td class="${row.error > .8 ? "cell-bad" : ""}">${row.error.toFixed(3)}</td>
+        <td class="${row.alarm ? "cell-bad" : "cell-ok"}">${row.alarm ? "ON" : "OFF"}</td>
+        <td class="${row.allowed ? "cell-ok" : "cell-bad"}">${row.allowed ? "TRUE" : "FALSE"}</td>
+      </tr>`).join("");
+    }
+
+    function updateSoftLimitCard() {
+      const limits = [["X SoftLimitMin", "0.00 mm"], ["X SoftLimitMax", "300.00 mm"], ["Y SoftLimitMin", "0.00 mm"], ["Y SoftLimitMax", "200.00 mm"], ["Z SoftLimitMin", "0.00 mm"], ["Z SoftLimitMax", "80.00 mm"]];
+      document.getElementById("softLimitKv").innerHTML = limits.map(([k,v]) => `<div class="kv"><span>${k}</span><span>${v}</span></div>`).join("");
+      const exceeded = state.limitState === "SoftLimitExceeded";
+      document.getElementById("softLimitCard").classList.toggle("warning", exceeded);
+      document.getElementById("softLimitMessage").innerHTML = exceeded
+        ? `<strong style="color:var(--orange)">Target position is outside software limit. Command rejected.</strong>`
+        : `Target ${state.targetPosition.toFixed(2)} mm ${state.targetPosition <= 300 ? "is within the configured range." : "is waiting for validation."}`;
+    }
+
+    function updateHardLimitInputs() {
+      const limits = [
+        ["X− Limit", false], ["X+ Limit", state.hardLimitOn], ["Y− Limit", false], ["Y+ Limit", false], ["Z− Limit", false], ["Z+ Limit", false]
+      ];
+      document.getElementById("hardLimitList").innerHTML = limits.map(([name,on]) => `<div class="limit-item"><span>${name}: ${on ? "ON" : "OFF"}</span><i class="io-led ${on ? "on" : ""}"></i></div>`).join("");
+      document.getElementById("hardLimitCard").classList.toggle("danger", state.hardLimitOn);
+    }
+
+    function updateServoStatus() {
+      document.getElementById("servoKv").innerHTML = [
+        ["Drive State", state.servoAlarm ? "ALARM" : "SERVO ON", state.servoAlarm ? "bad" : "ok"],
+        ["Alarm Code", state.servoAlarmCode, state.servoAlarm ? "bad" : ""],
+        ["Following Error", `${state.followingError.toFixed(3)} mm`, state.followingError > .8 ? "bad" : "ok"],
+        ["Home Trusted", state.homeDone ? "TRUE" : "FALSE", state.homeDone ? "ok" : "warn"],
+        ["Reset Allowed", String(!state.hardLimitOn && !!state.alarmId), !state.hardLimitOn && state.alarmId ? "ok" : ""],
+        ["Command Allowed", String(state.commandAllowed), state.commandAllowed ? "ok" : "bad"]
+      ].map(([k,v,c]) => `<div class="kv"><span>${k}</span><span class="${c}">${v}</span></div>`).join("");
+      document.getElementById("servoStatusCard").classList.toggle("danger", state.servoAlarm);
+    }
+
+    function updateAlarmDetail() {
+      const card = document.getElementById("alarmDetailCard");
+      if (!state.alarmId && !state.finalRecovered) {
+        card.classList.remove("danger", "success");
+        document.getElementById("alarmDetailContent").innerHTML = `<div class="alarm-empty">✓ No active alarm<br><span style="color:#496b7d">limit / servo / following error are monitored continuously</span></div>`;
+        return;
+      }
+      if (state.finalRecovered) {
+        card.classList.remove("danger");
+        card.classList.add("success");
+        document.getElementById("alarmDetailContent").innerHTML = `<div class="alarm-copy"><strong style="color:var(--green)">Alarm history closed · ${state.recoveryId}</strong><br>Limit OFF, Servo ON, Home DONE, safety chain OK. The previous alarm remains in MES/log for traceability.</div>`;
+        return;
+      }
+      card.classList.add("danger");
+      card.classList.remove("success");
+      document.getElementById("alarmDetailContent").innerHTML = `<div class="kv-grid">
+        ${[
+          ["alarmId", state.alarmId || "ALM-X-SERVO-001"],
+          ["alarmType", state.servoAlarmType || "Servo following error or overload"],
+          ["axis", "X"],
+          ["alarmCode", state.servoAlarmCode],
+          ["cause", state.alarmCause],
+          ["actionRequired", state.actionRequired],
+          ["canAutoResume", "false"],
+          ["currentPosition", `${state.currentPosition.toFixed(2)} mm`]
+        ].map(([k,v]) => `<div class="kv"><span>${k}</span><span class="${k === "canAutoResume" ? "bad" : ""}">${v}</span></div>`).join("")}
+      </div>`;
+    }
+
+    function updateSafetyChecklist() {
+      document.getElementById("safetyChecklist").innerHTML = safetyItems.map((item, index) => {
+        const done = index < state.safetyPassed || currentStepIndex > 2;
+        const invalid = (item === "Servo alarm clear" && state.servoAlarm) || (item === "No hard limit active" && state.hardLimitOn) || (item === "Home done" && !state.homeDone);
+        return `<div class="check-item ${done && !invalid ? "done" : ""}"><span class="check-mark">${done && !invalid ? "✓" : "·"}</span><span>${item}</span><span class="check-state">${invalid ? "FAIL" : (done ? "PASS" : "WAIT")}</span></div>`;
+      }).join("");
+      if (activeNodeId === "precheck") {
+        gsap.fromTo("#safetyChecklist .check-item", { opacity: .25, x: -6 }, { opacity: 1, x: 0, duration: .26, stagger: .16, ease: "power1.out" });
+      }
+    }
+
+    function updateRecoveryChecklist() {
+      document.getElementById("recoveryChecklist").innerHTML = recoverySteps.map((item, index) => {
+        const done = index < state.recoveryCompleted;
+        const current = index === state.recoveryCompleted && !!state.alarmId;
+        return `<div class="check-item ${done ? "done" : ""} ${current ? "current" : ""}"><span class="check-mark">${done ? "✓" : index + 1}</span><span>${item}</span><span class="check-state">${done ? "DONE" : current ? "NEXT" : "WAIT"}</span></div>`;
+      }).join("");
+    }
+
+    function curvePoints(values, max, min = 0) {
+      if (!values.length) return "0,80";
+      return values.map((value, index) => {
+        const x = values.length === 1 ? 0 : index * (300 / (values.length - 1));
+        const ratio = Math.max(0, Math.min(1, (value - min) / (max - min)));
+        const y = 87 - ratio * 73;
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      }).join(" ");
+    }
+
+    function updatePositionCurve() {
+      document.getElementById("positionCurve").setAttribute("points", curvePoints(state.positionHistory, 320));
+      document.getElementById("errorCurve").setAttribute("points", curvePoints(state.errorHistory, 2.2));
+      document.getElementById("positionChartValue").textContent = state.currentPosition.toFixed(2);
+      document.getElementById("errorChartValue").textContent = state.followingError.toFixed(3);
+      document.getElementById("errorCurve").setAttribute("stroke", state.followingError > .8 ? "#ff5364" : "#2ed7d0");
+    }
+
+    function updateFinalResult() {
+      const el = document.getElementById("finalResult");
+      const card = document.getElementById("finalCard");
+      el.classList.toggle("done", state.finalRecovered);
+      card.classList.toggle("success", state.finalRecovered);
+      if (state.finalRecovered) {
+        el.innerHTML = `<div class="result-icon">✓</div><div><h4>Recovery Completed</h4><p>${state.recoveryId} · AlarmClear · HomeDone · Ready</p></div>`;
+      } else if (state.alarmId) {
+        el.innerHTML = `<div class="result-icon">!</div><div><h4>Recovery in progress</h4><p>Auto run remains locked until all ${recoverySteps.length} recovery checks pass.</p></div>`;
+      } else {
+        el.innerHTML = `<div class="result-icon">○</div><div><h4>Waiting for recovery</h4><p>报警发生后，这里会显示受控恢复结果。</p></div>`;
+      }
+    }
+
+    // 向可追溯日志窗口写入一条时间戳消息。
+    function appendLog(message, level = "INFO") {
+      const now = new Date();
+      const time = now.toLocaleTimeString("zh-CN", { hour12: false });
+      logs.push({ time, level, message });
+      if (logs.length > 80) logs.shift();
+      const logWindow = document.getElementById("logWindow");
+      logWindow.innerHTML = logs.map(row => `<div class="log-line"><span class="log-time">${row.time}</span><span class="log-level ${row.level.toLowerCase()}">${row.level}</span><span>${row.message}</span></div>`).join("");
+      logWindow.scrollTop = logWindow.scrollHeight;
+    }
+
+    // -------------------------
+    // 6. SVG 工业现场动画
+    // -------------------------
+    function mapPositionToScene(position) {
+      return 125 + (Math.max(0, Math.min(320, position)) / 320) * 430;
+    }
+
+    function updateMachineScene(nodeId) {
+      const screenX = mapPositionToScene(state.currentPosition);
+      const targetX = mapPositionToScene(state.targetPosition);
+      const isAlarm = !!state.alarmId;
+      const moveDuration = ["moving", "jog", "home", "recover", "hazard"].includes(nodeId) ? 1.25 : .45;
+      gsap.to("#xCarriage", { x: screenX - 232, duration: moveDuration, ease: nodeId === "jog" ? "none" : "power2.inOut" });
+      gsap.to("#targetMarker", { x: targetX - 474, duration: .5, ease: "power2.out" });
+      document.getElementById("targetMarkerText").textContent = `TARGET ${state.targetPosition.toFixed(0)}`;
+      document.getElementById("targetMarkerText").setAttribute("fill", state.limitState === "SoftLimitExceeded" ? "#ffad42" : "#69baff");
+      document.querySelector("#targetMarker path:first-child").setAttribute("stroke", state.limitState === "SoftLimitExceeded" ? "#ffad42" : "#3ea6ff");
+      document.querySelector("#targetMarker path:nth-child(2)").setAttribute("fill", state.limitState === "SoftLimitExceeded" ? "#ffad42" : "#3ea6ff");
+
+      document.getElementById("hmiTargetText").textContent = `Target X: ${state.targetPosition.toFixed(2)} mm`;
+      document.getElementById("hmiStatusText").textContent = isAlarm ? "ALARM" : state.motionState.toUpperCase();
+      document.getElementById("hmiStatusText").setAttribute("fill", isAlarm ? "#ff5364" : (state.motionState === "SoftLimitBlocked" ? "#ffad42" : "#49dd91"));
+      gsap.to("#hmiAlarmPopup", { opacity: isAlarm ? 1 : 0, duration: .25 });
+
+      document.getElementById("xDriveText").textContent = state.servoAlarm ? "ALARM" : "SERVO ON";
+      document.getElementById("xDriveText").setAttribute("fill", state.servoAlarm ? "#ff5364" : "#49dd91");
+      document.getElementById("xDriveLed").setAttribute("fill", state.servoAlarm ? "#ff5364" : "#49dd91");
+      document.querySelector("#xServoMotor circle").setAttribute("fill", state.servoAlarm ? "#642733" : "#173747");
+      document.querySelector("#xServoMotor circle").setAttribute("stroke", state.servoAlarm ? "#ff5364" : "#5a8aa0");
+      document.getElementById("xServoDrive").classList.toggle("alarm-blink", state.servoAlarm && nodeId === "hazard");
+
+      document.getElementById("xPlusSwitch").setAttribute("fill", state.hardLimitOn ? "#ff5364" : "#465865");
+      document.getElementById("xPlusSwitch").setAttribute("stroke", state.hardLimitOn ? "#ffd1d6" : "#9ab0bb");
+      document.getElementById("xPlusLever").setAttribute("stroke", state.hardLimitOn ? "#ff5364" : "#aabcc5");
+      document.getElementById("xPlusLabel").setAttribute("fill", state.hardLimitOn ? "#ff5364" : "#a7bbc5");
+      document.getElementById("towerRed").setAttribute("fill", isAlarm ? "#ff5364" : "#6e2934");
+      document.getElementById("towerRed").classList.toggle("alarm-blink", isAlarm);
+      document.getElementById("towerGreen").setAttribute("fill", isAlarm ? "#1e4b35" : "#49dd91");
+      document.getElementById("readyLamp").setAttribute("fill", isAlarm ? "#632633" : "#49dd91");
+
+      document.getElementById("clampLeft").setAttribute("stroke", state.dangerousOutputs ? "#8fb3c3" : "#465762");
+      document.getElementById("motionTrace").setAttribute("opacity", ["moving", "monitor", "hazard"].includes(nodeId) ? ".85" : ".15");
+      document.getElementById("motionTrace").setAttribute("stroke", nodeId === "hazard" || nodeId === "stop" ? "#ff5364" : "#3ea6ff");
+      document.getElementById("jogTrace").setAttribute("opacity", nodeId === "jog" ? "1" : "0");
+      document.getElementById("sceneCaption").textContent = sceneCaption(nodeId);
+
+      if (nodeId === "home") {
+        gsap.fromTo("#homeSensor", { opacity: .3 }, { opacity: 1, duration: .35, repeat: 5, yoyo: true });
+        gsap.fromTo("#yAxisGroup", { y: 7 }, { y: 0, duration: 1.1, ease: "power2.inOut" });
+        gsap.fromTo("#cameraGroup", { y: -8 }, { y: 0, duration: 1.25, ease: "power2.inOut" });
+      } else {
+        gsap.set("#homeSensor", { opacity: 1 });
+      }
+      if (nodeId === "reset") {
+        gsap.fromTo("#resetButtonSvg", { scale: 1, transformOrigin: "center" }, { scale: .75, duration: .18, repeat: 1, yoyo: true });
+      }
+    }
+
+    function sceneCaption(nodeId) {
+      const captions = {
+        ready: "Ready: axes homed, safety chain healthy.",
+        receive: `Recipe / vision target → X ${state.targetPosition.toFixed(0)} mm`,
+        precheck: "E-stop · Door · Servo · Home · Limit → PASS",
+        softcheck: state.limitState === "SoftLimitExceeded" ? "Soft limit exceeded before motion." : "Software boundary check passed.",
+        softblock: "Command rejected: physical platform does not move.",
+        modify: "Correct recipe or vision offset before retry.",
+        send: "IPC → Motion Card → X Servo Drive",
+        moving: "Real axis moving with closed-loop feedback.",
+        monitor: "Position · Limit · Servo Alarm · Following Error",
+        hazard: "X+ LIMIT ON · SERVO ALARM · COORDINATE UNTRUSTED",
+        stop: "StopAllAxes() has priority over production logic.",
+        outputs: "Motion stopped; dangerous outputs are OFF.",
+        alarm: "Alarm latched · Auto run locked.",
+        explain: "HMI gives cause and controlled recovery order.",
+        inspect: "Operator checks the real machine first.",
+        jog: "Low-speed JogMinus only: X+ Limit → OFF",
+        reset: "Reset accepted only after fault condition is gone.",
+        home: "Re-home rebuilds a trusted machine coordinate.",
+        recover: "Recovery completed · Ready restored.",
+        inposition: "In-position confirmed inside tolerance.",
+        continue: "Safe move completed · auto process continues."
+      };
+      return captions[nodeId] || "Motion control safety state machine.";
+    }
+
+    function animateCommandPulse(color = "blue") {
+      const fill = color === "orange" ? "#ffad42" : "#3ea6ff";
+      gsap.killTweensOf("#commandPulse");
+      gsap.set("#commandPulse", { opacity: 1, attr: { cx: 148, cy: 67, fill } });
+      gsap.timeline().to("#commandPulse", { attr: { cx: 186 }, duration: .45, ease: "none" })
+        .to("#commandPulse", { attr: { cx: 294 }, duration: .55, ease: "none" })
+        .to("#commandPulse", { attr: { cx: 330 }, duration: .4, ease: "none" })
+        .to("#commandPulse", { opacity: 0, duration: .25 });
+    }
+
+    function animateFeedbackPulse() {
+      gsap.killTweensOf("#feedbackPulse");
+      gsap.set("#feedbackPulse", { opacity: 1, attr: { cx: 373, cy: 155, fill: "#49dd91" } });
+      gsap.timeline().to("#feedbackPulse", { attr: { cy: 110 }, duration: .45 })
+        .to("#feedbackPulse", { attr: { cx: 294, cy: 67 }, duration: .55 })
+        .to("#feedbackPulse", { attr: { cx: 148 }, duration: .65 })
+        .to("#feedbackPulse", { opacity: 0, duration: .2 });
+    }
+
+    function animateSoftBlockPulse() {
+      gsap.killTweensOf("#commandPulse");
+      gsap.set("#commandPulse", { opacity: 1, attr: { cx: 294, cy: 67, fill: "#ffad42" } });
+      gsap.timeline().to("#commandPulse", { attr: { cx: 186 }, duration: .45, ease: "none" })
+        .to("#commandPulse", { attr: { cx: 148 }, duration: .4, ease: "none" })
+        .to("#commandPulse", { opacity: 0, duration: .25 });
+    }
+
+    function animateAlarmSignal() {
+      gsap.killTweensOf("#alarmPulse");
+      gsap.set("#alarmPulse", { opacity: 1, attr: { cx: 560, cy: 420, fill: "#ff5364" } });
+      gsap.timeline().to("#alarmPulse", { attr: { cx: 373, cy: 155 }, duration: .55, ease: "power2.out" })
+        .to("#alarmPulse", { attr: { cx: 294, cy: 67 }, duration: .45 })
+        .to("#alarmPulse", { attr: { cx: 148 }, duration: .55 })
+        .to("#alarmPulse", { opacity: 0, duration: .2 });
+    }
+
+    // -------------------------
+    // 7. GSAP 时间线与主控制
+    // -------------------------
+    function buildTimeline() {
+      if (masterTimeline) masterTimeline.kill();
+      masterTimeline = gsap.timeline({ paused: true, onComplete: () => { isPlaying = false; updatePlayButton(); } });
+      let cursor = 0;
+      animationSteps.forEach((step, index) => {
+        masterTimeline.addLabel(`step-${index}`, cursor);
+        masterTimeline.call(() => updateStep(index), null, cursor);
+        cursor += step.duration;
+      });
+      masterTimeline.to({}, { duration: .1 }, cursor);
+      return masterTimeline;
+    }
+
+    function playAnimation() {
+      if (!masterTimeline) buildTimeline();
+      if (masterTimeline.progress() >= .999) restartAnimation(false);
+      const label = `step-${currentStepIndex}`;
+      const currentTime = masterTimeline.labels[label] ?? 0;
+      if (masterTimeline.time() <= currentTime + .03) masterTimeline.seek(currentTime + .04);
+      masterTimeline.play();
+      isPlaying = true;
+      updatePlayButton();
+    }
+
+    function pauseAnimation() {
+      if (masterTimeline) masterTimeline.pause();
+      if (injectionTimeline) injectionTimeline.pause();
+      isPlaying = false;
+      updatePlayButton();
+    }
+
+    function restartAnimation(autoPlay = false) {
+      if (masterTimeline) masterTimeline.kill();
+      if (injectionTimeline) injectionTimeline.kill();
+      resetState();
+      animationSteps = makeSteps();
+      renderFlowNodes();
+      updateStep(0);
+      buildTimeline();
+      masterTimeline.seek(.04).pause();
+      isPlaying = false;
+      updatePlayButton();
+      if (autoPlay) playAnimation();
+    }
+
+    function stepNext() {
+      pauseAnimation();
+      if (currentStepIndex >= animationSteps.length - 1) return;
+      updateStep(currentStepIndex + 1);
+      const nextLabel = `step-${currentStepIndex}`;
+      masterTimeline.seek((masterTimeline.labels[nextLabel] || 0) + .04).pause();
+    }
+
+    function updatePlayButton() {
+      document.getElementById("playBtn").textContent = isPlaying ? "▶ Playing…" : "▶ Play";
+    }
+
+    function toggleScenario() {
+      const order = ["hard", "soft", "normal"];
+      scenario = order[(order.indexOf(scenario) + 1) % order.length];
+      const def = scenarioDefinitions[scenario];
+      const pill = document.getElementById("scenarioPill");
+      pill.textContent = def.label;
+      pill.className = `scenario-pill ${def.className}`;
+      document.getElementById("scenarioBtn").textContent = `Toggle: ${def.label}`;
+      restartAnimation(false);
+      appendLog(`Scenario changed to ${def.label}.`, "INFO");
+    }
+
+    // -------------------------
+    // 8. 异常注入与手动恢复操作
+    // -------------------------
+    function enterInjectedFault(kind) {
+      pauseAnimation();
+      if (injectionTimeline) injectionTimeline.kill();
+      state.finalRecovered = false;
+      state.motionState = kind === "hard" ? "LimitTriggered" : "ServoAlarm";
+      state.axisState = "Alarm";
+      state.recoveryState = "WaitingOperator";
+      state.servoAlarm = true;
+      state.servoAlarmType = kind === "hard" ? "Positive Limit Triggered" : "Servo following error or overload";
+      state.servoAlarmCode = kind === "hard" ? "0x2310 / LIMIT+" : "0x8611 / FOLLOW ERR";
+      state.alarmId = kind === "hard" ? "ALM-X-POS-LIMIT-001" : "ALM-X-SERVO-001";
+      state.alarmCause = kind === "hard" ? "X axis reached the positive hard limit during motion." : "Servo following error or overload was injected for training.";
+      state.actionRequired = kind === "hard" ? "Stop motion, jog away from limit, reset servo, and re-home axes." : "Stop motion, inspect mechanics, reset servo, and re-home axes.";
+      state.hardLimitOn = kind === "hard";
+      state.limitState = kind === "hard" ? "HardLimitTriggered" : "Normal";
+      state.currentPosition = kind === "hard" ? 304 : state.currentPosition;
+      state.followingError = kind === "hard" ? 1.82 : 1.55;
+      state.commandAllowed = false;
+      state.motionDone = true;
+      state.homeDone = false;
+      state.recoveryCompleted = 0;
+      activeNodeId = "hazard";
+      selectedNodeId = "hazard";
+      rememberTelemetry();
+      updateAllViews(kind === "hard" ? "已注入 X+ 硬限位：平台停止，进入报警停机链。" : "已注入 X 轴伺服报警：平台停止，自动运行被抢占。 ");
+      selectNode("hazard");
+      animateAlarmSignal();
+      appendLog(kind === "hard" ? "Hard limit injected." : "Servo alarm injected.", "ALARM");
+
+      injectionTimeline = gsap.timeline();
+      injectionTimeline.call(() => injectedStage("stop", "StopAllAxes()", 1, "Stop all axes."), null, .8)
+        .call(() => injectedStage("outputs", "SafeOutputOff", 2, "Dangerous outputs turned off."), null, 1.6)
+        .call(() => {
+          state.motionState = "Alarm";
+          state.axisState = "ResetRequired";
+          state.autoRunLocked = true;
+          state.recoveryState = "WaitingOperator";
+          state.operatorSafe = true;
+          state.recoveryCompleted = 3;
+          activeNodeId = "explain";
+          selectedNodeId = "explain";
+          updateAllViews("异常已被锁存在 Alarm：请按受控顺序退限位、复位、回零、清警。");
+          selectNode("explain");
+          appendLog("Machine entered Alarm state. Operator action required.", "ALARM");
+        }, null, 2.4);
+    }
+
+    function injectedStage(nodeId, motionState, completed, message) {
+      activeNodeId = nodeId;
+      selectedNodeId = nodeId;
+      state.motionState = motionState;
+      state.commandType = nodeId === "stop" ? "StopAllAxes()" : state.commandType;
+      if (nodeId === "outputs") state.dangerousOutputs = false;
+      state.recoveryCompleted = completed;
+      updateAllViews(message);
+      selectNode(nodeId);
+      appendLog(message, "ALARM");
+    }
+
+    function injectServoAlarm() { enterInjectedFault("servo"); }
+    function injectHardLimit() { enterInjectedFault("hard"); }
+
+    function jogAway() {
+      if (!state.alarmId || state.motionState !== "Alarm") {
+        appendLog("Jog rejected: machine must be in Alarm recovery mode.", "WARN");
+        return;
+      }
+      if (!state.operatorSafe) {
+        appendLog("Jog rejected: operator safety confirmation is missing.", "WARN");
+        return;
+      }
+      pauseAnimation();
+      activeNodeId = "jog";
+      selectedNodeId = "jog";
+      applyNodeState("jog");
+      updateAllViews("手动低速退让：只允许远离限位的方向；X+ Limit 已解除。");
+      selectNode("jog");
+      appendLog("Manual jog away from limit. X+ Limit OFF.", "RECOVERY");
+    }
+
+    function resetServo() {
+      if (!state.alarmId || state.hardLimitOn || !state.operatorSafe || !["Alarm", "ManualJog"].includes(state.motionState)) {
+        appendLog("Servo reset rejected: stop, inspection, or fault-removal condition is incomplete.", "WARN");
+        return;
+      }
+      pauseAnimation();
+      activeNodeId = "reset";
+      selectedNodeId = "reset";
+      applyNodeState("reset");
+      updateAllViews("真实故障条件已消失，ServoAlarmReset(X) 执行并确认驱动器状态。 ");
+      selectNode("reset");
+      appendLog("Servo reset completed.", "RECOVERY");
+    }
+
+    function rehomeAxes() {
+      if (!state.alarmId || state.servoAlarm || state.hardLimitOn) {
+        appendLog("Re-home rejected: clear limit and servo alarm first.", "WARN");
+        return;
+      }
+      pauseAnimation();
+      activeNodeId = "home";
+      selectedNodeId = "home";
+      applyNodeState("home");
+      updateAllViews("X/Y/Z 重新寻找 Home Sensor：位置归零，机器坐标重新可信。 ");
+      selectNode("home");
+      appendLog("Re-home completed. Machine coordinate is trusted.", "RECOVERY");
+    }
+
+    function clearAlarm() {
+      if (!state.alarmId || state.servoAlarm || state.hardLimitOn || !state.homeDone) {
+        appendLog("Clear Alarm rejected: recovery conditions are incomplete.", "WARN");
+        return;
+      }
+      pauseAnimation();
+      activeNodeId = "recover";
+      selectedNodeId = "recover";
+      applyNodeState("recover");
+      updateAllViews("恢复条件全部满足：报警清除，自动运行许可重新建立，设备回到 Ready。 ");
+      selectNode("recover");
+      appendLog("Alarm cleared. Ready.", "RECOVERY");
+    }
+
+    function updateRecoveryButtons() {
+      const alarmMode = !!state.alarmId && state.motionState === "Alarm";
+      document.getElementById("jogBtn").disabled = !alarmMode || !state.operatorSafe || !state.hardLimitOn;
+      document.getElementById("resetBtn").disabled = !state.alarmId || state.hardLimitOn || !state.servoAlarm || !state.operatorSafe || !["Alarm", "ManualJog"].includes(state.motionState);
+      document.getElementById("homeBtn").disabled = !state.alarmId || state.servoAlarm || state.hardLimitOn || state.homeDone;
+      document.getElementById("clearBtn").disabled = !state.alarmId || state.servoAlarm || state.hardLimitOn || !state.homeDone;
+    }
+
+    // -------------------------
+    // 9. 初始化
+    // -------------------------
+    document.addEventListener("DOMContentLoaded", () => {
+      resetState();
+      animationSteps = makeSteps();
+      renderFlowNodes();
+      selectNode("ready");
+      updateStep(0);
+      buildTimeline();
+      masterTimeline.seek(.04).pause();
+      updatePlayButton();
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,1520 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>视觉定位补偿与运动坐标转换动画</title>
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+  <script>window.gsap || document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"><\\/script>');</script>
+  <style>
+    :root {
+      --bg: #061018;
+      --panel: #0b1823;
+      --panel-2: #102331;
+      --panel-3: #132a38;
+      --line: #27465a;
+      --text: #e7f6ff;
+      --muted: #86a6b9;
+      --blue: #3d8dff;
+      --cyan: #22d3ee;
+      --green: #38d996;
+      --orange: #ffad42;
+      --red: #ff5d6c;
+      --gray: #70889a;
+      --shadow: 0 14px 40px rgba(0, 0, 0, .28);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 13% 8%, rgba(34, 211, 238, .10), transparent 26rem),
+        radial-gradient(circle at 90% 4%, rgba(61, 141, 255, .11), transparent 28rem),
+        linear-gradient(180deg, #061018 0%, #07131c 56%, #050d13 100%);
+      font-family: Inter, "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+      min-width: 1180px;
+    }
+
+    button { font: inherit; }
+    .app { max-width: 1880px; margin: 0 auto; padding: 18px; }
+    .hero {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid #234154;
+      border-radius: 20px;
+      padding: 22px 24px 20px;
+      background: linear-gradient(135deg, rgba(15, 36, 49, .96), rgba(8, 22, 32, .92));
+      box-shadow: var(--shadow);
+    }
+    .hero::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background-image: linear-gradient(rgba(255,255,255,.018) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.018) 1px, transparent 1px);
+      background-size: 28px 28px;
+      mask-image: linear-gradient(90deg, black, transparent 82%);
+    }
+    .hero-kicker { color: var(--cyan); font: 700 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .16em; text-transform: uppercase; }
+    h1 { margin: 9px 0 8px; font-size: clamp(26px, 2.2vw, 38px); line-height: 1.16; letter-spacing: -.02em; }
+    .hero p { max-width: 1420px; margin: 0; color: #b9cfdb; line-height: 1.72; font-size: 14px; }
+    .essence {
+      display: flex; align-items: center; gap: 10px; margin-top: 14px; color: #dffbff; font-size: 13px;
+    }
+    .essence b { color: var(--cyan); }
+    .mini-pipe { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin-top: 14px; }
+    .mini-pipe span { padding: 6px 9px; border: 1px solid #28516a; background: #0b2130; border-radius: 999px; color: #bfeaff; font-size: 11px; }
+    .mini-pipe i { color: #4d7188; font-style: normal; }
+
+    .control-deck {
+      position: sticky; top: 0; z-index: 30; display: grid; grid-template-columns: auto 1fr auto;
+      gap: 12px; align-items: center; margin: 14px 0; padding: 10px 12px;
+      border: 1px solid #244255; border-radius: 16px;
+      background: rgba(7, 19, 28, .94); backdrop-filter: blur(14px); box-shadow: 0 12px 30px rgba(0,0,0,.24);
+    }
+    .controls { display: flex; flex-wrap: wrap; gap: 7px; }
+    .btn {
+      border: 1px solid #30556b; border-radius: 9px; padding: 8px 10px; color: #dff6ff;
+      background: linear-gradient(180deg, #183448, #102535); cursor: pointer; transition: .18s ease;
+      font-size: 11px; font-weight: 750; letter-spacing: .01em;
+    }
+    .btn:hover { transform: translateY(-1px); border-color: #4f8aa9; filter: brightness(1.12); }
+    .btn.primary { background: linear-gradient(180deg, #216eb9, #164b83); border-color: #3d8dff; }
+    .btn.warning { color: #ffe5bc; border-color: #8f5e28; background: #382719; }
+    .btn.danger { color: #ffd5d9; border-color: #8e3642; background: #381a20; }
+    .btn.success { color: #d8fff0; border-color: #29755a; background: #143629; }
+    .step-summary { min-width: 0; }
+    .step-label { color: var(--cyan); font: 700 10px/1 ui-monospace, monospace; letter-spacing: .12em; }
+    #currentStepText { margin-top: 5px; font-size: 12px; color: #d7e9f2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .mode-badge { min-width: 170px; text-align: center; border: 1px solid #2e6c58; border-radius: 10px; padding: 8px 10px; background: #102e25; color: #8ff2c5; font: 800 11px/1.2 ui-monospace, monospace; }
+    .mode-badge.warn { color: #ffd99b; border-color: #805a2f; background: #332515; }
+    .mode-badge.alarm { color: #ffb3bb; border-color: #8f3741; background: #35181e; }
+
+    .status-strip { display: grid; grid-template-columns: repeat(8, minmax(130px, 1fr)); gap: 8px; margin-bottom: 14px; }
+    .status-chip { min-width: 0; padding: 9px 10px; border: 1px solid #213d50; border-radius: 11px; background: #0a1822; }
+    .status-chip .k { display: block; margin-bottom: 4px; color: #7194a9; font: 650 9px/1 ui-monospace, monospace; text-transform: uppercase; }
+    .status-chip .v { display: block; color: #daf1fb; font: 750 10px/1.25 ui-monospace, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .status-chip.state .v { color: var(--cyan); }
+
+    .theater { display: grid; grid-template-columns: minmax(400px, .95fr) minmax(510px, 1.18fr) minmax(340px, .77fr); gap: 14px; align-items: start; }
+    .column { min-width: 0; border: 1px solid #203d50; border-radius: 17px; background: rgba(8, 22, 32, .91); box-shadow: var(--shadow); overflow: hidden; }
+    .column-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 56px; padding: 13px 15px; border-bottom: 1px solid #203c4f; background: linear-gradient(180deg, #102838, #0b1d29); }
+    .column-head h2 { margin: 0; font-size: 14px; }
+    .column-head small { color: #6f95aa; font: 600 9px/1.2 ui-monospace, monospace; }
+    .scene-wrap { padding: 12px; }
+    .scene-svg { width: 100%; height: auto; display: block; border: 1px solid #203d4d; border-radius: 14px; background: #07151f; }
+    .scene-caption { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+    .caption-card { min-height: 64px; padding: 10px; border: 1px solid #213f52; border-radius: 11px; background: #0b1c28; }
+    .caption-card b { display: block; margin-bottom: 5px; color: #9fdff1; font-size: 10px; }
+    .caption-card span { color: #95afbd; font-size: 10px; line-height: 1.5; }
+
+    .svg-label { fill: #bcd5e1; font: 700 11px/1 "Microsoft YaHei", sans-serif; }
+    .svg-mono { fill: #82a7ba; font: 600 9px/1 ui-monospace, monospace; }
+    .wire { fill: none; stroke: #23465a; stroke-width: 2; stroke-dasharray: 5 5; }
+    .device { fill: #102a39; stroke: #3e718c; stroke-width: 2; }
+    .device-dark { fill: #0b202c; stroke: #31566b; stroke-width: 1.5; }
+    .device-active { filter: drop-shadow(0 0 7px rgba(34, 211, 238, .75)); }
+    .template-shape { fill: none; stroke: #71889a; stroke-width: 2; stroke-dasharray: 7 5; }
+    .actual-shape { fill: #183949; stroke: #20d4ec; stroke-width: 2.4; }
+    .mark-dot { fill: #07121a; stroke: #41f0ae; stroke-width: 3; }
+    .target-original { fill: #6f8392; stroke: #c5d0d6; stroke-width: 1; }
+    .target-comp { fill: #26e3ef; stroke: #d8fdff; stroke-width: 1.5; filter: drop-shadow(0 0 7px #22d3ee); }
+    .safe-zone { fill: rgba(56, 217, 150, .035); stroke: #2c765b; stroke-width: 2; stroke-dasharray: 8 5; }
+    .safe-zone.invalid { fill: rgba(255, 93, 108, .09); stroke: var(--red); filter: drop-shadow(0 0 8px rgba(255,93,108,.5)); }
+    .sensor { fill: #1a2d38; stroke: #5f7887; }
+    .sensor.on { fill: #2ae5a1; stroke: #c3ffe9; filter: drop-shadow(0 0 5px #38d996); }
+    .alarm-lamp { fill: #3c2530; stroke: #814453; }
+    .alarm-lamp.on { fill: #ff4d60; stroke: #ffd1d6; filter: drop-shadow(0 0 9px #ff4d60); }
+    .ready-lamp { fill: #244337; stroke: #46715e; }
+    .ready-lamp.on { fill: #35df9b; stroke: #d9fff0; filter: drop-shadow(0 0 8px #35df9b); }
+    .pulse-cyan { fill: var(--cyan); filter: drop-shadow(0 0 6px var(--cyan)); }
+    .pulse-blue { fill: var(--blue); filter: drop-shadow(0 0 6px var(--blue)); }
+    .pulse-green { fill: var(--green); filter: drop-shadow(0 0 6px var(--green)); }
+    .pulse-red { fill: var(--red); filter: drop-shadow(0 0 6px var(--red)); }
+    .hidden { opacity: 0; pointer-events: none; }
+    .coordinate-axis line { stroke-width: 2; }
+
+    .debug-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; padding: 10px; }
+    .tech-card { min-width: 0; border: 1px solid #213f52; border-radius: 12px; background: #0a1a25; overflow: hidden; }
+    .tech-card.full { grid-column: 1 / -1; }
+    .tech-card-head { display: flex; align-items: center; justify-content: space-between; min-height: 34px; padding: 8px 10px; border-bottom: 1px solid #1d394a; background: #102431; }
+    .tech-card-head h3 { margin: 0; font-size: 10px; color: #c9e5f0; }
+    .mini-state { padding: 3px 6px; border: 1px solid #375c70; border-radius: 999px; color: #8fb4c7; font: 800 8px/1 ui-monospace, monospace; }
+    .mini-state.ok { color: #8ff2c5; border-color: #2f7a5f; background: #112d24; }
+    .mini-state.ng { color: #ffb5bd; border-color: #8c3d47; background: #351a20; }
+    .mini-state.warn { color: #ffda9d; border-color: #845b2c; background: #352617; }
+    .card-body { padding: 9px; }
+    .camera-screen { position: relative; height: 235px; background: radial-gradient(circle at center, #18313e, #07131c 72%); }
+    .camera-screen.blur svg { filter: blur(4px) saturate(.65); }
+    .camera-screen.failed .detect-box { display: none; }
+    .camera-screen.failed::after { content: "MARK ?"; position: absolute; inset: 0; display: grid; place-items: center; color: var(--red); font: 900 24px/1 ui-monospace, monospace; text-shadow: 0 0 14px rgba(255,93,108,.7); }
+    .camera-screen svg { width: 100%; height: 100%; display: block; transition: filter .25s; }
+    .scanline { position: absolute; left: 0; right: 0; top: 0; height: 2px; background: linear-gradient(90deg, transparent, var(--cyan), transparent); opacity: 0; box-shadow: 0 0 10px var(--cyan); }
+    .camera-screen.scanning .scanline { opacity: 1; animation: scan 1.25s linear infinite; }
+    @keyframes scan { from { top: 4%; } to { top: 94%; } }
+
+    .metric-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+    .metric { padding: 7px; border: 1px solid #203b4c; border-radius: 8px; background: #0b202b; }
+    .metric .k { display: block; color: #6f94a8; font: 600 8px/1.2 ui-monospace, monospace; }
+    .metric .v { display: block; margin-top: 4px; color: #d8f5ff; font: 800 10px/1 ui-monospace, monospace; }
+    .metric .v.ok { color: var(--green); }
+    .metric .v.ng { color: var(--red); }
+    .kv-table { width: 100%; border-collapse: collapse; font: 600 8.5px/1.35 ui-monospace, monospace; }
+    .kv-table th, .kv-table td { padding: 4px 5px; border-bottom: 1px solid #173343; text-align: left; }
+    .kv-table th { color: #7196aa; font-weight: 650; }
+    .kv-table td { color: #c9e5ef; }
+    .kv-table td.num { color: #7fe9f4; text-align: right; }
+    .axis-table th, .axis-table td { white-space: nowrap; text-align: center; }
+    .axis-table td:first-child { color: var(--cyan); font-weight: 900; }
+    .formula-flow { display: grid; grid-template-columns: repeat(9, auto); align-items: center; justify-content: space-between; gap: 3px; }
+    .formula-box { min-width: 50px; padding: 8px 5px; text-align: center; border: 1px solid #2b5267; border-radius: 8px; background: #0e2735; color: #ccebf5; font: 750 8px/1.35 ui-monospace, monospace; }
+    .formula-box.active { color: #dbffff; border-color: var(--cyan); box-shadow: 0 0 0 1px rgba(34,211,238,.22), 0 0 14px rgba(34,211,238,.12); }
+    .formula-arrow { color: #47798e; font-weight: 900; }
+    .compare-track { position: relative; height: 78px; border: 1px solid #1e3b4b; border-radius: 9px; background: linear-gradient(90deg, rgba(255,255,255,.02) 1px, transparent 1px), linear-gradient(rgba(255,255,255,.02) 1px, transparent 1px), #091b25; background-size: 18px 18px; }
+    .point { position: absolute; width: 11px; height: 11px; border-radius: 50%; transform: translate(-50%, -50%); }
+    .point.original { left: 36%; top: 58%; background: #748896; }
+    .point.compensated { left: 61%; top: 41%; background: var(--cyan); box-shadow: 0 0 9px var(--cyan); }
+    .compare-arrow { position: absolute; left: 37%; top: 48%; width: 24%; height: 2px; background: var(--cyan); transform: rotate(-9deg); transform-origin: left center; }
+    .compare-arrow::after { content: ""; position: absolute; right: -1px; top: -4px; border-left: 7px solid var(--cyan); border-top: 5px solid transparent; border-bottom: 5px solid transparent; }
+    .compare-label { position: absolute; color: #91aebb; font: 700 8px/1 ui-monospace, monospace; }
+    .command-code { min-height: 54px; padding: 9px; border: 1px solid #213d4f; border-radius: 8px; background: #06141d; color: #79e5f1; font: 700 9px/1.55 ui-monospace, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .validation-list { display: grid; gap: 6px; }
+    .validation-row { display: flex; justify-content: space-between; padding: 6px 7px; border-radius: 7px; background: #0c222d; color: #8ca9b8; font-size: 9px; }
+    .validation-row b { color: var(--green); font: 800 9px/1 ui-monospace, monospace; }
+    .validation-row b.ng { color: var(--red); }
+    .log-window { height: 136px; overflow: auto; padding: 8px 10px; background: #06131c; font: 650 8.5px/1.65 ui-monospace, monospace; }
+    .log-line { color: #8ba9b9; border-bottom: 1px dotted rgba(57,91,110,.24); }
+    .log-line .time { color: #52758a; }
+    .log-line .idx { color: var(--cyan); }
+    .log-line.warn { color: #ffd083; }
+    .log-line.error { color: #ff939e; }
+    .final-card { display: flex; gap: 10px; align-items: center; min-height: 73px; }
+    .result-orb { display: grid; place-items: center; flex: 0 0 44px; height: 44px; border-radius: 50%; color: #678496; border: 2px solid #315064; background: #0d202b; font: 900 10px/1 ui-monospace, monospace; }
+    .result-orb.ok { color: #d7fff0; border-color: var(--green); background: #16382c; box-shadow: 0 0 16px rgba(56,217,150,.22); }
+    .result-orb.ng { color: #ffe2e5; border-color: var(--red); background: #3b1b21; box-shadow: 0 0 16px rgba(255,93,108,.22); }
+    .final-copy b { display: block; margin-bottom: 4px; font-size: 11px; }
+    .final-copy span { color: #82a1b1; font-size: 9px; line-height: 1.45; }
+
+    .flow-wrap { position: relative; height: 1430px; overflow: auto; padding: 11px; background: #081721; }
+    .flow-section-label { display: flex; align-items: center; gap: 7px; margin: 5px 3px 9px; color: #6f94a8; font: 750 9px/1 ui-monospace, monospace; letter-spacing: .1em; }
+    .flow-section-label::after { content: ""; flex: 1; height: 1px; background: #203c4d; }
+    .flow-list { display: grid; gap: 7px; position: relative; }
+    .flow-list.normal::before { content: ""; position: absolute; left: 18px; top: 18px; bottom: 18px; width: 2px; background: linear-gradient(var(--blue), var(--cyan), var(--green)); opacity: .38; }
+    .flow-node {
+      position: relative; z-index: 1; display: grid; grid-template-columns: 31px 1fr auto; gap: 8px; align-items: center;
+      width: 100%; min-height: 52px; padding: 7px 8px; text-align: left; border: 1px solid #274557; border-radius: 10px;
+      color: #d5eaf3; background: linear-gradient(180deg, #102431, #0b1d28); cursor: pointer; transition: .18s ease;
+    }
+    .flow-node:hover { border-color: #457891; transform: translateX(2px); }
+    .flow-index { display: grid; place-items: center; width: 27px; height: 27px; border-radius: 50%; color: #83a7ba; border: 1px solid #31566b; background: #091b25; font: 800 8px/1 ui-monospace, monospace; }
+    .flow-title { min-width: 0; }
+    .flow-title b { display: block; font-size: 10px; line-height: 1.3; }
+    .flow-title small { display: block; margin-top: 3px; color: #668b9f; font: 650 8px/1 ui-monospace, monospace; }
+    .flow-tag { padding: 3px 5px; border: 1px solid #31556a; border-radius: 999px; color: #789bad; font: 800 7px/1 ui-monospace, monospace; }
+    .flow-node.current { border-color: var(--cyan); background: linear-gradient(90deg, rgba(34,211,238,.18), #102c3a); box-shadow: 0 0 0 1px rgba(34,211,238,.18), 0 0 16px rgba(34,211,238,.15); }
+    .flow-node.current .flow-index { color: #e6ffff; border-color: var(--cyan); background: #0f4754; }
+    .flow-node.selected { outline: 2px solid rgba(61,141,255,.58); outline-offset: 1px; }
+    .flow-node.retry { border-color: #654b2e; background: linear-gradient(180deg, #302416, #231b13); }
+    .flow-node.retry .flow-index, .flow-node.retry .flow-tag { color: #ffc873; border-color: #865e2d; }
+    .flow-node.alarm { border-color: #71313b; background: linear-gradient(180deg, #321920, #251218); }
+    .flow-node.alarm .flow-index, .flow-node.alarm .flow-tag { color: #ff9da7; border-color: #943c48; }
+    .flow-node.done { border-color: #245947; }
+    .flow-node.done .flow-index { color: var(--green); border-color: #2d795d; }
+    .flow-token { position: absolute; z-index: 5; left: 3px; top: 0; display: grid; place-items: center; width: 30px; height: 15px; border: 1px solid #bffbff; border-radius: 999px; color: #eaffff; background: #0b8fa2; box-shadow: 0 0 10px rgba(34,211,238,.65); font: 900 6px/1 ui-monospace, monospace; pointer-events: none; }
+    .branch-note { margin: 8px 4px 10px 42px; padding: 6px 8px; border-left: 2px solid var(--orange); color: #a9865b; font-size: 8px; line-height: 1.5; }
+
+    .detail-panel { margin-top: 14px; border: 1px solid #234154; border-radius: 17px; overflow: hidden; background: #091a24; box-shadow: var(--shadow); }
+    .detail-head { display: flex; align-items: center; justify-content: space-between; padding: 13px 15px; border-bottom: 1px solid #203d4f; background: linear-gradient(90deg, #102b3a, #0b1e2a); }
+    .detail-head h2 { margin: 0; font-size: 14px; }
+    #detailNodeBadge { color: var(--cyan); font: 800 9px/1 ui-monospace, monospace; }
+    .detail-grid { display: grid; grid-template-columns: 1.2fr 1fr 1fr; gap: 9px; padding: 11px; }
+    .detail-item { padding: 10px; border: 1px solid #1e3b4c; border-radius: 10px; background: #0b202b; }
+    .detail-item.wide { grid-column: span 2; }
+    .detail-item.full { grid-column: 1 / -1; }
+    .detail-item b { display: block; margin-bottom: 6px; color: #74a8be; font: 800 9px/1 ui-monospace, monospace; }
+    .detail-item p { margin: 0; color: #c2d7e0; font-size: 10px; line-height: 1.62; }
+    .tech-tags { display: flex; flex-wrap: wrap; gap: 5px; }
+    .tech-tags span { padding: 4px 6px; border: 1px solid #2d566a; border-radius: 999px; color: #8ee8f1; background: #0d2a37; font-size: 8px; }
+    .english-line { color: #a8ffd8 !important; font: 750 11px/1.5 ui-monospace, monospace !important; }
+    .footer-note { padding: 14px 4px 2px; text-align: center; color: #54768a; font-size: 9px; }
+
+    @media (max-width: 1380px) {
+      .status-strip { grid-template-columns: repeat(6, minmax(125px, 1fr)); }
+      .theater { grid-template-columns: minmax(390px, .9fr) minmax(500px, 1.15fr) minmax(320px, .75fr); }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <header class="hero">
+      <div class="hero-kicker">vision_motion_compensation · industrial animation theater</div>
+      <h1>上位机中的视觉定位补偿与运动坐标转换</h1>
+      <p>这个动画展示上位机如何把相机识别到的工件偏移转换成运动控制可以执行的机械坐标补偿。系统先移动到拍照位并采集图像，通过 OpenCV 识别 Mark 点，计算图像坐标下的像素偏移和角度偏移，再根据相机到运动平台的标定关系转换成毫米级机械偏移。补偿后的目标点经过软限位和最大补偿量检查后，才会发送给运动控制卡执行。重点不是单个视觉算法，而是图像坐标、机械坐标、标定、补偿、运动执行和异常保护之间的关系。</p>
+      <div class="essence"><span>核心本质</span><b>相机测量真实位置与标准位置之差 → 标定转换 → 生成运动控制可执行的补偿目标</b></div>
+      <div class="mini-pipe"><span>Camera / pixel</span><i>→</i><span>OpenCV / dx, dy, θ</span><i>→</i><span>Calibration / mm</span><i>→</i><span>MotionService</span><i>→</i><span>Motion Card / Servo</span><i>→</i><span>Trace / MES</span></div>
+    </header>
+
+    <section class="control-deck" aria-label="动画控制台">
+      <div class="controls">
+        <button class="btn primary" onclick="playAnimation()">▶ Play</button>
+        <button class="btn" onclick="pauseAnimation()">Ⅱ Pause</button>
+        <button class="btn" onclick="restartAnimation()">↺ Restart</button>
+        <button class="btn primary" onclick="stepNext()">Step Next →</button>
+        <button class="btn" onclick="toggleResult()">Toggle Result</button>
+        <button class="btn warning" onclick="injectBlurImage()">Inject Blur Image</button>
+        <button class="btn danger" onclick="injectLargeOffset()">Inject Large Offset</button>
+        <button class="btn warning" onclick="retryCapture()">Retry Capture</button>
+        <button class="btn success" onclick="resetAlarm()">Reset Alarm</button>
+      </div>
+      <div class="step-summary">
+        <div class="step-label" id="stepCounter">STEP 01 / 17</div>
+        <div id="currentStepText">加载产品配方、标准点位、模板 Mark 与相机—平台标定关系。</div>
+      </div>
+      <div class="mode-badge" id="resultModeBadge">VISION OK</div>
+    </section>
+
+    <section class="status-strip" id="statusStrip">
+      <div class="status-chip"><span class="k">workpieceId</span><span class="v" id="sWorkpiece">WP-VISION-001</span></div>
+      <div class="status-chip"><span class="k">frameId</span><span class="v" id="sFrame">FRAME-001</span></div>
+      <div class="status-chip"><span class="k">calibId</span><span class="v" id="sCalib">CALIB-CAM-TO-STAGE-01</span></div>
+      <div class="status-chip"><span class="k">visionResultId</span><span class="v" id="sVisionResult">VR-MARK-001</span></div>
+      <div class="status-chip"><span class="k">compensationId</span><span class="v" id="sCompensation">COMP-XYT-001</span></div>
+      <div class="status-chip"><span class="k">motionCommandId</span><span class="v" id="sMotionCommand">CMD-COMP-MOVE-001</span></div>
+      <div class="status-chip"><span class="k">traceId</span><span class="v" id="sTrace">TRACE-VISION-MOTION-001</span></div>
+      <div class="status-chip state"><span class="k">visionState</span><span class="v" id="sVisionState">Idle</span></div>
+      <div class="status-chip state"><span class="k">motionState</span><span class="v" id="sMotionState">Idle</span></div>
+      <div class="status-chip state"><span class="k">coordinateState</span><span class="v" id="sCoordinateState">ImageCoordinate</span></div>
+      <div class="status-chip state"><span class="k">qualityResult</span><span class="v" id="sQualityResult">Unknown</span></div>
+      <div class="status-chip"><span class="k">dx_mm</span><span class="v" id="sDx">—</span></div>
+      <div class="status-chip"><span class="k">dy_mm</span><span class="v" id="sDy">—</span></div>
+      <div class="status-chip"><span class="k">dtheta_deg</span><span class="v" id="sTheta">—</span></div>
+      <div class="status-chip"><span class="k">MotionService</span><span class="v" id="sService">WAITING</span></div>
+      <div class="status-chip state"><span class="k">Final Result</span><span class="v" id="sFinal">IN PROGRESS</span></div>
+    </section>
+
+    <section class="theater">
+      <article class="column">
+        <div class="column-head"><h2>工业现场：视觉引导运动补偿工站</h2><small>CAMERA · IPC · MOTION · SERVO · IO</small></div>
+        <div class="scene-wrap">
+          <svg class="scene-svg" id="factoryScene" viewBox="0 0 760 780" role="img" aria-label="三轴点胶视觉补偿工站示意图">
+            <defs>
+              <marker id="arrowCyan" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#22d3ee"/></marker>
+              <marker id="arrowBlue" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#3d8dff"/></marker>
+              <linearGradient id="screenGlow" x1="0" x2="1"><stop stop-color="#0c3342"/><stop offset="1" stop-color="#0b2230"/></linearGradient>
+              <pattern id="stageGrid" width="20" height="20" patternUnits="userSpaceOnUse"><path d="M20 0H0V20" fill="none" stroke="#244452" stroke-width="1"/></pattern>
+            </defs>
+
+            <path class="wire" d="M176 105 C250 90 300 85 366 95" />
+            <path class="wire" d="M116 186 C110 246 108 284 110 338" />
+            <path class="wire" d="M178 361 C245 362 282 390 330 427" />
+            <path class="wire" d="M178 407 C250 408 290 430 340 454" />
+            <path class="wire" d="M178 453 C250 455 296 465 352 478" />
+            <path class="wire" d="M175 142 C285 170 470 152 620 116" />
+
+            <g id="ipcDevice">
+              <rect x="28" y="40" width="160" height="145" rx="12" class="device" />
+              <rect x="43" y="57" width="130" height="82" rx="6" fill="url(#screenGlow)" stroke="#38a8c1" />
+              <text x="55" y="78" class="svg-label">上位机 IPC / HMI</text>
+              <text x="55" y="96" class="svg-mono" id="hmiRecipeText">recipe: —</text>
+              <text x="55" y="112" class="svg-mono" id="hmiCalibText">calib: —</text>
+              <text x="55" y="128" class="svg-mono" id="hmiStateText">STATE: IDLE</text>
+              <rect x="79" y="145" width="58" height="8" rx="4" fill="#294758" />
+              <path d="M91 153 L84 173 H132 L124 153" class="device-dark" />
+              <circle cx="166" cy="50" r="6" class="ready-lamp" id="readyLamp" />
+              <circle cx="149" cy="50" r="6" class="alarm-lamp" id="alarmLamp" />
+            </g>
+
+            <g id="mesDevice">
+              <ellipse cx="650" cy="66" rx="65" ry="19" class="device" />
+              <path d="M585 66 V131 C585 142 614 151 650 151 C686 151 715 142 715 131 V66" class="device" />
+              <ellipse cx="650" cy="131" rx="65" ry="19" fill="#0c2532" stroke="#3e718c" stroke-width="2" />
+              <text x="619" y="101" class="svg-label">数据库 / MES</text>
+              <text x="613" y="119" class="svg-mono" id="mesText">TRACE WAIT</text>
+            </g>
+
+            <g id="cameraGroup">
+              <rect x="332" y="38" width="104" height="78" rx="10" class="device" id="cameraBody" />
+              <circle cx="384" cy="82" r="25" fill="#07141c" stroke="#4d7e95" stroke-width="4" />
+              <circle cx="384" cy="82" r="10" fill="#173b51" stroke="#22d3ee" />
+              <rect x="365" y="116" width="38" height="32" rx="5" class="device-dark" />
+              <ellipse cx="384" cy="156" rx="58" ry="22" fill="none" stroke="#618397" stroke-width="7" id="ringLight" />
+              <text x="342" y="30" class="svg-label">相机 Camera</text>
+              <text x="346" y="190" class="svg-label">环形光源 Light</text>
+              <path d="M345 175 L302 402 M423 175 L466 402" fill="none" stroke="#22d3ee" opacity=".12" stroke-dasharray="5 6" id="cameraFov" />
+            </g>
+
+            <g id="motionCard">
+              <rect x="25" y="320" width="170" height="66" rx="10" class="device" />
+              <rect x="39" y="337" width="88" height="31" rx="5" fill="#0b1d27" stroke="#31576c" />
+              <circle cx="145" cy="344" r="5" fill="#38d996" />
+              <circle cx="160" cy="344" r="5" fill="#3d8dff" />
+              <circle cx="175" cy="344" r="5" fill="#70889a" />
+              <text x="47" y="356" class="svg-label">Motion Card</text>
+              <text x="39" y="309" class="svg-label">运动控制卡</text>
+            </g>
+
+            <g id="servoDrives">
+              <text x="30" y="408" class="svg-label">伺服驱动器 / 电机</text>
+              <g><rect x="25" y="420" width="170" height="50" rx="8" class="device-dark"/><text x="42" y="450" class="svg-label">X Axis Servo</text><circle cx="165" cy="445" r="12" fill="#0a1821" stroke="#3d8dff"/><path d="M159 445h12M165 439v12" stroke="#3d8dff"/></g>
+              <g><rect x="25" y="478" width="170" height="50" rx="8" class="device-dark"/><text x="42" y="508" class="svg-label">Y Axis Servo</text><circle cx="165" cy="503" r="12" fill="#0a1821" stroke="#22d3ee"/><path d="M159 503h12M165 497v12" stroke="#22d3ee"/></g>
+              <g><rect x="25" y="536" width="170" height="50" rx="8" class="device-dark"/><text x="42" y="566" class="svg-label">Z Axis Servo</text><circle cx="165" cy="561" r="12" fill="#0a1821" stroke="#38d996"/><path d="M159 561h12M165 555v12" stroke="#38d996"/></g>
+            </g>
+
+            <g id="stageAssembly">
+              <rect x="254" y="385" width="440" height="313" rx="17" fill="#091923" stroke="#355a6c" stroke-width="2" />
+              <text x="270" y="410" class="svg-label">三轴运动平台 / Fixture / Workpiece</text>
+              <rect x="275" y="426" width="397" height="247" rx="12" fill="url(#stageGrid)" stroke="#274a5c" />
+              <rect x="292" y="444" width="362" height="209" rx="9" class="safe-zone" id="safeZone" />
+              <line x1="303" y1="636" x2="640" y2="636" stroke="#3d8dff" stroke-width="7"/><text x="514" y="628" class="svg-mono">X GUIDE</text>
+              <line x1="310" y1="623" x2="310" y2="463" stroke="#22d3ee" stroke-width="7"/><text x="318" y="480" class="svg-mono">Y GUIDE</text>
+              <g class="coordinate-axis">
+                <line x1="325" y1="608" x2="384" y2="608" stroke="#3d8dff" marker-end="url(#arrowBlue)"/><text x="389" y="612" class="svg-mono">+X mm</text>
+                <line x1="325" y1="608" x2="325" y2="550" stroke="#22d3ee" marker-end="url(#arrowCyan)"/><text x="316" y="542" class="svg-mono">+Y mm</text>
+              </g>
+              <circle cx="298" cy="642" r="8" class="sensor" id="homeSensor"/><text x="274" y="667" class="svg-mono">HOME</text>
+              <rect x="646" y="625" width="9" height="27" rx="3" class="sensor" id="limitSensor"/><text x="618" y="668" class="svg-mono">LIMIT</text>
+
+              <g id="movingPlatform">
+                <rect x="385" y="482" width="210" height="120" rx="11" fill="#152d39" stroke="#4b6d7d" stroke-width="2" />
+                <rect x="399" y="496" width="182" height="92" rx="10" fill="#0c202a" stroke="#3f5f6f" />
+                <text x="465" y="578" class="svg-mono">FIXTURE</text>
+                <g id="clamps">
+                  <path d="M407 515 h25 v24 h-12 v-10 h-13z" fill="#7b8c96" stroke="#aebbc1" id="clampLeft" />
+                  <path d="M573 515 h-25 v24 h12 v-10 h13z" fill="#7b8c96" stroke="#aebbc1" id="clampRight" />
+                  <text x="466" y="509" class="svg-mono">Clamp</text>
+                </g>
+                <rect x="430" y="515" width="120" height="53" rx="12" class="template-shape" id="leftTemplateOutline" />
+                <g id="leftActualWorkpiece">
+                  <rect x="430" y="515" width="120" height="53" rx="12" class="actual-shape" />
+                  <path d="M445 526 H535 M445 555 H535" stroke="#2e6476" />
+                  <circle cx="451" cy="542" r="7" class="mark-dot" />
+                  <circle cx="529" cy="542" r="7" class="mark-dot" />
+                </g>
+                <text x="451" y="593" class="svg-mono">WORKPIECE</text>
+                <circle cx="449" cy="530" r="6" class="target-original hidden" id="leftOriginalTarget"/>
+                <circle cx="460" cy="524" r="7" class="target-comp hidden" id="leftCompTarget"/>
+                <path d="M449 530 L459 525" stroke="#22d3ee" stroke-width="2" marker-end="url(#arrowCyan)" class="hidden" id="leftCompArrow" />
+              </g>
+
+              <g id="toolHead">
+                <rect x="488" y="425" width="46" height="47" rx="7" class="device" />
+                <path d="M511 472 V519" stroke="#b7cad3" stroke-width="6" />
+                <path d="M511 516 l-4 17 h8z" fill="#dbe8ed" />
+                <circle cx="511" cy="533" r="4" fill="#ffad42" class="hidden" id="glueDrop" />
+                <text x="543" y="447" class="svg-label">Z / 点胶针头</text>
+              </g>
+              <path d="M457 524 Q505 505 551 532" fill="none" stroke="#ffad42" stroke-width="5" stroke-linecap="round" class="hidden" id="glueLine" />
+            </g>
+
+            <g id="coordBridge" class="hidden">
+              <rect x="514" y="208" width="185" height="112" rx="12" fill="#0c2330" stroke="#22d3ee" />
+              <text x="529" y="229" class="svg-label">坐标系转换</text>
+              <g class="coordinate-axis"><line x1="546" y1="272" x2="580" y2="272" stroke="#22d3ee" marker-end="url(#arrowCyan)"/><line x1="546" y1="272" x2="546" y2="242" stroke="#22d3ee" marker-end="url(#arrowCyan)"/></g>
+              <text x="529" y="294" class="svg-mono">IMAGE: pixel</text>
+              <path d="M596 264 H626" stroke="#3d8dff" marker-end="url(#arrowBlue)" />
+              <text x="638" y="256" class="svg-mono">X mm</text><text x="638" y="273" class="svg-mono">Y mm</text><text x="638" y="290" class="svg-mono">θ deg</text>
+              <text x="529" y="310" class="svg-mono" id="bridgeValue">scale + rotate</text>
+            </g>
+
+            <g id="frameToken" class="hidden"><rect x="0" y="0" width="72" height="23" rx="11" fill="#0a8798" stroke="#c6fbff"/><text x="10" y="15" fill="#eaffff" font-size="9" font-family="monospace">FRAME-001</text></g>
+            <circle cx="0" cy="0" r="7" class="pulse-blue hidden" id="commandPulse" />
+            <circle cx="0" cy="0" r="7" class="pulse-green hidden" id="feedbackPulse" />
+            <g id="traceToken" class="hidden"><rect width="74" height="23" rx="11" fill="#168355" stroke="#ccffe7"/><text x="9" y="15" fill="#e9fff6" font-size="8" font-family="monospace">TRACE DATA</text></g>
+
+            <g id="resultArea">
+              <rect x="596" y="718" width="112" height="42" rx="10" fill="#0e222d" stroke="#345466" />
+              <text x="611" y="744" class="svg-label" id="resultAreaText">OK / NG : —</text>
+            </g>
+          </svg>
+
+          <div class="scene-caption">
+            <div class="caption-card"><b>虚线标准模板 vs 实线真实工件</b><span>相机测量两者的平移与旋转差，固定配方点位才有机会对准真实边缘。</span></div>
+            <div class="caption-card"><b>视觉结果不会直接驱动轴</b><span>必须经 Calibration → Validation → MotionService → Motion Card，异常时命令被拒绝。</span></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="column">
+        <div class="column-head"><h2>视觉定位补偿与坐标转换调试视图</h2><small>OPENCV · CALIBRATION · MOTIONSERVICE</small></div>
+        <div class="debug-grid">
+          <section class="tech-card full">
+            <div class="tech-card-head"><h3>相机图像窗口 / Camera Image</h3><span class="mini-state" id="imageStateBadge">WAITING</span></div>
+            <div class="camera-screen" id="cameraScreen">
+              <svg viewBox="0 0 540 235">
+                <defs><marker id="imgArrow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 Z" fill="#22d3ee"/></marker></defs>
+                <rect x="26" y="20" width="488" height="190" rx="7" fill="none" stroke="#376173" stroke-dasharray="7 5" />
+                <text x="36" y="38" class="svg-mono">ROI 0 · CAMERA-01 · <tspan id="imageFrameText">NO FRAME</tspan></text>
+                <rect x="167" y="76" width="208" height="88" rx="18" class="template-shape" />
+                <g id="cameraActualGroup">
+                  <rect x="167" y="76" width="208" height="88" rx="18" class="actual-shape" />
+                  <circle cx="205" cy="120" r="10" class="mark-dot" />
+                  <circle cx="337" cy="120" r="10" class="mark-dot" />
+                  <circle cx="271" cy="120" r="4" fill="#ffdd72" />
+                  <line x1="271" y1="120" x2="341" y2="120" stroke="#ffdd72" stroke-width="2" id="angleLine" />
+                  <rect x="187" y="101" width="36" height="38" fill="none" stroke="#38d996" stroke-width="2" class="detect-box" />
+                  <rect x="319" y="101" width="36" height="38" fill="none" stroke="#38d996" stroke-width="2" class="detect-box" />
+                </g>
+                <path d="M271 176 L285 170" stroke="#22d3ee" stroke-width="2" marker-end="url(#imgArrow)" id="imageOffsetArrow" class="hidden" />
+                <text x="286" y="188" class="svg-mono hidden" id="imageOffsetText">dx +12 px · dy -8 px · θ +0.35°</text>
+                <g class="coordinate-axis">
+                  <line x1="55" y1="181" x2="101" y2="181" stroke="#22d3ee" marker-end="url(#imgArrow)"/><text x="105" y="185" class="svg-mono">+u px</text>
+                  <line x1="55" y1="181" x2="55" y2="207" stroke="#22d3ee" marker-end="url(#imgArrow)"/><text x="62" y="207" class="svg-mono">+v px</text>
+                </g>
+                <text x="419" y="199" class="svg-label" id="imageResultText">WAIT</text>
+              </svg>
+              <div class="scanline"></div>
+            </div>
+          </section>
+
+          <section class="tech-card">
+            <div class="tech-card-head"><h3>图像质量卡 / Quality Gate</h3><span class="mini-state" id="qualityBadge">UNKNOWN</span></div>
+            <div class="card-body metric-grid">
+              <div class="metric"><span class="k">Brightness</span><span class="v" id="qBrightness">—</span></div>
+              <div class="metric"><span class="k">BlurScore</span><span class="v" id="qBlur">—</span></div>
+              <div class="metric"><span class="k">ROI Visible</span><span class="v" id="qRoi">—</span></div>
+            </div>
+          </section>
+
+          <section class="tech-card">
+            <div class="tech-card-head"><h3>Mark 点检测结果</h3><span class="mini-state" id="markBadge">WAITING</span></div>
+            <div class="card-body metric-grid">
+              <div class="metric"><span class="k">Mark A conf.</span><span class="v" id="mConfA">—</span></div>
+              <div class="metric"><span class="k">Mark B conf.</span><span class="v" id="mConfB">—</span></div>
+              <div class="metric"><span class="k">Centroid</span><span class="v" id="mCentroid">—</span></div>
+            </div>
+          </section>
+
+          <section class="tech-card">
+            <div class="tech-card-head"><h3>像素坐标表 / Pixel Coordinates</h3><span class="mini-state" id="pixelBadge">IMAGE</span></div>
+            <div class="card-body"><table class="kv-table" id="pixelTableBody"></table></div>
+          </section>
+
+          <section class="tech-card">
+            <div class="tech-card-head"><h3>标定参数卡 / Calibration</h3><span class="mini-state" id="calibrationBadge">LOADED</span></div>
+            <div class="card-body"><table class="kv-table" id="calibrationTableBody"></table></div>
+          </section>
+
+          <section class="tech-card full">
+            <div class="tech-card-head"><h3>坐标转换公式可视化</h3><span class="mini-state" id="formulaBadge">PIXEL → MACHINE</span></div>
+            <div class="card-body">
+              <div class="formula-flow" id="formulaFlow">
+                <div class="formula-box" data-formula="0">[+12, -8]<br>pixel offset</div><span class="formula-arrow">→</span>
+                <div class="formula-box" data-formula="1">× [0.025]<br>mm / pixel</div><span class="formula-arrow">→</span>
+                <div class="formula-box" data-formula="2">R(2.0°)<br>camera → stage</div><span class="formula-arrow">→</span>
+                <div class="formula-box" data-formula="3">[+0.307, -0.189]<br>machine offset</div><span class="formula-arrow">→</span>
+                <div class="formula-box" data-formula="4">P' = RθP + Δ<br>target</div>
+              </div>
+            </div>
+          </section>
+
+          <section class="tech-card">
+            <div class="tech-card-head"><h3>机械坐标补偿表</h3><span class="mini-state" id="compensationBadge">WAITING</span></div>
+            <div class="card-body"><table class="kv-table" id="compensationTableBody"></table></div>
+          </section>
+
+          <section class="tech-card">
+            <div class="tech-card-head"><h3>补偿前 / 补偿后点位</h3><span class="mini-state">TRANSLATE + ROTATE</span></div>
+            <div class="card-body">
+              <div class="compare-track">
+                <span class="point original"></span><span class="compare-label" style="left:25%;top:69%">Original</span>
+                <span class="compare-arrow" id="compareArrow"></span>
+                <span class="point compensated" id="compareCompPoint"></span><span class="compare-label" style="left:64%;top:24%">Compensated</span>
+              </div>
+            </div>
+          </section>
+
+          <section class="tech-card full">
+            <div class="tech-card-head"><h3>轴状态表 / Axis Feedback</h3><span class="mini-state" id="axisBadge">SERVO ON</span></div>
+            <div class="card-body" style="overflow:auto"><table class="kv-table axis-table"><thead><tr><th>Axis</th><th>Current Position</th><th>Target Position</th><th>Servo</th><th>Home</th><th>MotionDone</th><th>Limit</th><th>Alarm</th></tr></thead><tbody id="axisTableBody"></tbody></table></div>
+          </section>
+
+          <section class="tech-card">
+            <div class="tech-card-head"><h3>当前运动命令 / MotionService</h3><span class="mini-state" id="commandBadge">WAIT</span></div>
+            <div class="card-body"><div class="command-code" id="commandCode">MotionService.WaitForRecipe();</div></div>
+          </section>
+
+          <section class="tech-card">
+            <div class="tech-card-head"><h3>软限位检查卡 / Validation</h3><span class="mini-state" id="validationBadge">WAITING</span></div>
+            <div class="card-body validation-list" id="validationList"></div>
+          </section>
+
+          <section class="tech-card">
+            <div class="tech-card-head"><h3>当前状态卡 / State Machine</h3><span class="mini-state" id="stateMachineBadge">IDLE</span></div>
+            <div class="card-body" id="currentStateCard"></div>
+          </section>
+
+          <section class="tech-card">
+            <div class="tech-card-head"><h3>配方 / IO / 工艺 / 追溯</h3><span class="mini-state" id="ioBadge">READY</span></div>
+            <div class="card-body metric-grid">
+              <div class="metric"><span class="k">Recipe</span><span class="v" id="recipeMetric">—</span></div>
+              <div class="metric"><span class="k">Workpiece / Clamp</span><span class="v" id="clampMetric">OFF / OFF</span></div>
+              <div class="metric"><span class="k">Process / Trace</span><span class="v" id="processMetric">WAIT / WAIT</span></div>
+            </div>
+          </section>
+
+          <section class="tech-card full">
+            <div class="tech-card-head"><h3>运行日志 / Event Log</h3><span class="mini-state">TRACE-VISION-MOTION-001</span></div>
+            <div class="log-window" id="logWindow"></div>
+          </section>
+
+          <section class="tech-card full">
+            <div class="tech-card-head"><h3>最终结果卡 / Final Result</h3><span class="mini-state" id="finalBadge">IN PROGRESS</span></div>
+            <div class="card-body final-card">
+              <div class="result-orb" id="resultOrb">WAIT</div>
+              <div class="final-copy"><b id="finalTitle">Cycle in progress</b><span id="finalDescription">视觉偏移尚未完成标定转换、合法性检查和补偿运动闭环。</span></div>
+            </div>
+          </section>
+        </div>
+      </article>
+
+      <article class="column">
+        <div class="column-head"><h2>视觉补偿运动控制业务闭环</h2><small>CLICK NODE FOR DETAILS</small></div>
+        <div class="flow-wrap" id="flowWrap">
+          <div class="flow-token" id="flowToken">FRAME</div>
+          <div class="flow-section-label">NORMAL BUSINESS LOOP</div>
+          <div class="flow-list normal" id="normalFlowList"></div>
+          <div class="branch-note">质量 NG / Mark Failed → Retry；补偿无效 → Alarm。报警后旧补偿必须丢弃，复位后重新采图。</div>
+          <div class="flow-section-label">RETRY / ALARM BRANCH</div>
+          <div class="flow-list" id="exceptionFlowList"></div>
+        </div>
+      </article>
+    </section>
+
+    <section class="detail-panel" id="technicalDetailPanel">
+      <div class="detail-head"><h2 id="detailTitle">技术细节面板</h2><span id="detailNodeBadge">SELECTED NODE</span></div>
+      <div class="detail-grid">
+        <div class="detail-item wide"><b>业务作用 / Business Purpose</b><p id="detailPurpose"></p></div>
+        <div class="detail-item"><b>关键技术 / Key Technologies</b><div class="tech-tags" id="detailTechnologies"></div></div>
+        <div class="detail-item"><b>输入 / Input</b><p id="detailInput"></p></div>
+        <div class="detail-item"><b>输出 / Output</b><p id="detailOutput"></p></div>
+        <div class="detail-item"><b>异常与判断 / Exception &amp; Decision</b><p id="detailAbnormal"></p></div>
+        <div class="detail-item full"><b>与前后节点的关系 / Relation</b><p id="detailRelation"></p></div>
+        <div class="detail-item full"><b>Simple Technical English · Interview Ready</b><p class="english-line" id="detailEnglish"></p></div>
+      </div>
+    </section>
+
+    <div class="footer-note">Single-file learning theater · HTML + CSS + JavaScript + SVG + GSAP · no backend</div>
+  </main>
+
+  <script>
+    // -----------------------------
+    // 1) Data model: process nodes
+    // -----------------------------
+    const flowNodes = [
+      {
+        id: "load-recipe-calibration", title: "加载产品配方与标定参数", shortLabel: "Load Recipe", branch: "normal",
+        businessPurpose: "根据产品型号加载标准点位、模板图、Mark 点位置、相机标定参数和运动补偿规则。",
+        input: "productModel、recipeId、templateMarkPoints、standardMotionPoints、calibId、cameraToStageMatrix。",
+        output: "RecipeLoaded、CalibrationLoaded；系统获得标准工艺位置和坐标转换关系。",
+        technologies: ["配方管理", "相机标定", "模板点位", "坐标系配置", "工艺版本管理"],
+        abnormalCases: ["配方不存在", "标定参数缺失", "模板点位错误", "相机与平台标定过期"],
+        relation: "视觉补偿流程的起点。没有标准模板与标定参数，图像结果无法转换成可信的运动坐标。",
+        interviewEnglish: "This step loads the recipe and calibration data before visual compensation starts."
+      },
+      {
+        id: "safety-home", title: "设备安全检查与回原点", shortLabel: "Safety & Home", branch: "normal",
+        businessPurpose: "检查设备安全状态，并让 X/Y/Z 轴回原点，建立可信机械坐标。",
+        input: "EmergencyStop、DoorClosed、ServoStatus、HomeSensor、LimitStatus、AxisPosition。",
+        output: "SafetyOK、HomeDone、MachineCoordinateReady。",
+        technologies: ["安全互锁", "伺服使能", "回原点", "限位保护", "机械坐标系"],
+        abnormalCases: ["急停未释放", "安全门打开", "轴未使能", "回零失败", "触发限位"],
+        relation: "视觉补偿最终会驱动真实轴运动，所以运动系统必须先处于安全状态，并拥有可信的坐标原点。",
+        interviewEnglish: "The motion system must be homed before using compensated machine coordinates."
+      },
+      {
+        id: "workpiece-clamp", title: "工件到位与夹紧", shortLabel: "Clamp Part", branch: "normal",
+        businessPurpose: "确认工件进入治具，并通过夹具固定，避免拍照或运动时工件位置变化。",
+        input: "WorkpieceSensor、ClampOutput、ClampLockedSensor、workpieceId。",
+        output: "WorkpieceReady、ClampLocked = true。",
+        technologies: ["IO 控制", "传感器检测", "气缸夹紧", "动作超时", "工件 ID 绑定"],
+        abnormalCases: ["工件未到位", "夹具未夹紧", "传感器误触发", "气压不足"],
+        relation: "工件稳定固定后，相机测到的位置才有意义；否则测量完成后工件再次移动，补偿就会失效。",
+        interviewEnglish: "The part must be fixed before the camera measures its real position."
+      },
+      {
+        id: "move-camera-position", title: "移动到拍照位", shortLabel: "Camera Position", branch: "normal",
+        businessPurpose: "控制 X/Y/Z 平台移动到相机拍照位置，让工件进入视野。",
+        input: "CameraPosition、SafeZHeight、CurrentAxisPosition、MoveSpeed。",
+        output: "InCameraPosition；工件处于相机 ROI 内。",
+        technologies: ["点位运动", "绝对位置运动", "安全高度", "到位确认", "软限位检查"],
+        abnormalCases: ["拍照点越界", "Z 轴不在安全高度", "运动超时", "未到位", "伺服报警"],
+        relation: "它把视觉流程与运动控制连接起来；采图前必须把工件稳定地送到标定时定义的拍照位置。",
+        interviewEnglish: "The motion stage moves the part into the camera view before image capture."
+      },
+      {
+        id: "capture-image", title: "触发相机采图", shortLabel: "Capture Frame", branch: "normal",
+        businessPurpose: "运动到位后触发相机和光源，采集当前工件图像，并绑定唯一 frameId。",
+        input: "InPosition、CameraTrigger、LightOn、exposureTime、frameId。",
+        output: "RawImageFrame：frameId、timestamp、cameraId、rawImage。",
+        technologies: ["相机触发", "光源控制", "曝光参数", "图像采集", "帧 ID 绑定"],
+        abnormalCases: ["相机无响应", "光源未打开", "曝光异常", "采图超时", "帧丢失"],
+        relation: "位于拍照位运动之后、图像处理之前；这一帧是后续质量门禁与 OpenCV 定位的共同输入。",
+        interviewEnglish: "The camera captures an image only after the stage reaches the photo position."
+      },
+      {
+        id: "image-quality", title: "图像质量检查", shortLabel: "Quality Gate", branch: "normal",
+        businessPurpose: "判断当前图像的亮度、清晰度与 ROI 可见性是否足以支持可靠的 Mark 定位。",
+        input: "RawImageFrame、brightness、contrast、blurScore、ROIVisibility。",
+        output: "ImageQualityOK 或 ImageQualityNG。",
+        technologies: ["亮度统计", "清晰度评估", "ROI 检查", "曝光判断", "图像门禁"],
+        abnormalCases: ["图像过暗", "过曝", "模糊", "工件不在视野", "Mark 点被遮挡"],
+        relation: "这是 OpenCV 定位前的质量门禁。质量 NG 时应重拍或报警，不能继续计算一组看似精确但实际错误的补偿量。",
+        interviewEnglish: "This step checks whether the image is good enough for reliable positioning."
+      },
+      {
+        id: "opencv-mark", title: "OpenCV 识别 Mark 点", shortLabel: "Locate Marks", branch: "normal",
+        businessPurpose: "从图像 ROI 中识别工件上的两个 Mark 点，输出实际像素位置及置信度。",
+        input: "QualityOKImage、ROI、templateMark、threshold、cameraParams。",
+        output: "MarkDetectionResult：MarkA、MarkB 的 pixelX、pixelY、confidence。",
+        technologies: ["模板匹配", "圆检测", "轮廓提取", "阈值分割", "ROI 定位", "置信度判断"],
+        abnormalCases: ["Mark 点缺失", "污渍遮挡", "反光", "匹配分数过低", "误识别"],
+        relation: "Mark 坐标是偏移计算的测量基础；任一 Mark 不可靠时，不允许生成运动补偿。",
+        interviewEnglish: "OpenCV finds the real mark positions in the image."
+      },
+      {
+        id: "calculate-pixel-offset", title: "计算像素偏移与角度偏移", shortLabel: "Pixel Offset", branch: "normal",
+        businessPurpose: "对比实际 Mark 与标准模板 Mark，计算工件在图像坐标中的质心平移和连线角度差。",
+        input: "DetectedMarkPoints、TemplateMarkPoints、frameId。",
+        output: "dx_pixel、dy_pixel、dtheta_deg、visionResultId。",
+        technologies: ["二维几何", "向量角度", "质心计算", "Mark 点匹配", "旋转角计算"],
+        abnormalCases: ["两 Mark 距离异常", "角度计算错误", "像素偏移过大", "Mark 顺序反了"],
+        relation: "它把识别结果变成可解释的偏移量，但单位仍是 pixel，坐标轴方向也仍属于图像坐标。",
+        interviewEnglish: "This step calculates how far the part moved in image coordinates."
+      },
+      {
+        id: "pixel-to-machine", title: "像素坐标转换为机械坐标", shortLabel: "Pixel to Machine", branch: "normal",
+        businessPurpose: "使用相机到平台的标定关系，把 pixel 偏移转换成 mm 偏移，并修正相机与平台坐标轴的旋转及方向差。",
+        input: "dx_pixel、dy_pixel、dtheta_deg、scaleX、scaleY、cameraToStageRotation、calibrationMatrix。",
+        output: "dx_mm、dy_mm、dtheta_machine、MachineOffset。",
+        technologies: ["像素到毫米", "相机标定", "坐标旋转", "仿射变换", "简化手眼标定"],
+        abnormalCases: ["标定参数错误", "单位换算错误", "轴方向相反", "旋转角配置错误"],
+        relation: "这是视觉模块与 MotionService 之间最关键的桥；12 px 不能直接理解为 X 轴移动 12 mm。",
+        interviewEnglish: "The pixel offset is converted into machine offset using calibration data."
+      },
+      {
+        id: "generate-compensated-target", title: "生成补偿后的目标点", shortLabel: "Build Target", branch: "normal",
+        businessPurpose: "把机械平移与角度偏移应用到标准点胶起点和路径，得到与真实工件对应的运动目标。",
+        input: "OriginalMotionPoint、MachineOffset、dtheta_machine、CompensationRule。",
+        output: "CompensatedTargetPoint：compensatedX、compensatedY、compensatedTheta。",
+        technologies: ["点位补偿", "路径平移", "旋转补偿", "坐标变换", "目标生成"],
+        abnormalCases: ["补偿方向反了", "旋转中心错误", "点位偏离产品", "路径整体变形"],
+        relation: "它把视觉测量真正转化为运动目标，但此时只是候选目标，尚未经过安全合法性检查。",
+        interviewEnglish: "The original motion point is adjusted based on the measured part offset."
+      },
+      {
+        id: "validate-compensation", title: "补偿点位合法性检查", shortLabel: "Validate Target", branch: "normal",
+        businessPurpose: "检查补偿目标是否位于软限位、工艺最大偏移和设备安全区域内。",
+        input: "CompensatedTargetPoint、SoftLimit、MaxOffset、SafeZone、ZHeight。",
+        output: "CompensationValid 或 CompensationInvalid。",
+        technologies: ["软限位检查", "最大补偿阈值", "禁区检查", "安全边界", "目标校验"],
+        abnormalCases: ["补偿量过大", "目标点越界", "路径进入禁区", "Z 高度不安全"],
+        relation: "位于运动命令之前，是阻止错误视觉结果撞机或造成批量工艺偏差的最后软件防线。",
+        interviewEnglish: "The software validates the compensated target before moving the machine."
+      },
+      {
+        id: "send-motion-command", title: "发送补偿运动命令", shortLabel: "Send MoveAbs", branch: "normal",
+        businessPurpose: "上位机通过 MotionService 把补偿坐标、速度和加速度封装成命令，并调用运动控制卡 SDK。",
+        input: "compensatedX、compensatedY、compensatedZ、velocity、acceleration、motionCommandId。",
+        output: "MoveAbs command sent；运动控制卡开始执行。",
+        technologies: ["MotionService", "运动卡 SDK", "绝对运动", "轴参数", "命令封装"],
+        abnormalCases: ["运动卡断线", "轴未使能", "未回零", "参数非法", "SDK 调用失败"],
+        relation: "它是从视觉与业务计算进入真实机器运动的边界点；只有 Valid 目标才允许越过这个边界。",
+        interviewEnglish: "The compensated machine position is sent to the motion controller."
+      },
+      {
+        id: "move-compensated-start", title: "运动到补偿后起点", shortLabel: "Corrected Move", branch: "normal",
+        businessPurpose: "运动控制卡驱动 X/Y/Z 轴移动到补偿后的真实工件起点。",
+        input: "MoveAbs command、ServoReady、CurrentPosition、CompensatedTarget。",
+        output: "AxisMoving；平台或点胶针头到达补偿后位置。",
+        technologies: ["多轴运动", "点位运动", "速度规划", "反馈位置", "伺服控制"],
+        abnormalCases: ["运动超时", "跟随误差", "限位触发", "伺服报警", "目标不可达"],
+        relation: "这一节点让视觉补偿从数字变成机械位移，并持续读取编码器反馈验证实际执行。",
+        interviewEnglish: "The motion system moves to the corrected target position."
+      },
+      {
+        id: "confirm-position", title: "到位确认", shortLabel: "In Position", branch: "normal",
+        businessPurpose: "比较命令位置与反馈位置，确认 X/Y/Z 真实到达补偿目标且误差在允许窗口内。",
+        input: "CommandPosition、FeedbackPosition、MotionDone、InPosition、PositionTolerance。",
+        output: "InPosition = true；允许执行工艺。",
+        technologies: ["运动完成判断", "反馈位置", "到位窗口", "位置误差", "状态轮询"],
+        abnormalCases: ["未到位", "位置误差过大", "MotionDone 异常", "到位超时"],
+        relation: "位于补偿运动之后、工艺触发之前；软件命令已结束不等于机械位置一定满足工艺精度。",
+        interviewEnglish: "The software confirms the corrected position before starting the process."
+      },
+      {
+        id: "execute-process", title: "执行点胶或加工动作", shortLabel: "Run Process", branch: "normal",
+        businessPurpose: "在补偿后的位置执行点胶、贴装、检测、打标或抓取动作。",
+        input: "InPosition、ProcessRecipe、ValveOutput 或 ToolTrigger。",
+        output: "ProcessDone；工艺动作完成。",
+        technologies: ["IO 触发", "点胶阀控制", "加工同步", "运动工艺互锁"],
+        abnormalCases: ["阀门无响应", "工具触发失败", "加工超时", "工艺结果 NG"],
+        relation: "这是补偿的业务价值：加工动作不再盲目对准固定配方点，而是对准每个真实工件。",
+        interviewEnglish: "The process runs at the corrected position instead of the fixed recipe position."
+      },
+      {
+        id: "record-trace", title: "记录补偿量与生产结果", shortLabel: "Save Trace", branch: "normal",
+        businessPurpose: "绑定工件、图像、视觉结果、补偿量、轴最终位置和工艺质量结果，形成可追溯记录。",
+        input: "workpieceId、frameId、visionResultId、dx_mm、dy_mm、dtheta_deg、qualityResult。",
+        output: "TraceRecord：视觉、补偿、运动和工艺结果。",
+        technologies: ["SQL 入库", "日志系统", "生产追溯", "视觉与运动数据绑定"],
+        abnormalCases: ["数据缺失", "frameId 未绑定", "数据库失败", "补偿量未记录"],
+        relation: "把一次短暂的设备动作变成可检索、可复盘、可用于质量分析的生产证据。",
+        interviewEnglish: "The system records the visual offset and final motion result for traceability."
+      },
+      {
+        id: "upload-mes-ready", title: "上传 MES 并回到 Ready", shortLabel: "MES & Ready", branch: "normal",
+        businessPurpose: "上传本次工件结果到 MES，清理本周期状态，让设备等待下一件。",
+        input: "TraceRecord、MESInterface、MachineStatus、AlarmStatus。",
+        output: "MESUploadOK、motionState = Ready。",
+        technologies: ["MES 接口", "状态机复位", "生产节拍", "结果上传", "设备闭环"],
+        abnormalCases: ["MES 上传失败", "网络异常", "设备未复位", "存在未清除报警"],
+        relation: "正常业务闭环的结束，也是下一轮生产的起点；上一工件的补偿量不可继承给下一工件。",
+        interviewEnglish: "The machine uploads the result and returns to Ready for the next part."
+      },
+      {
+        id: "vision-alarm", title: "视觉补偿报警", shortLabel: "Vision Alarm", branch: "alarm",
+        businessPurpose: "图像质量差、Mark 识别失败、补偿越界或标定无效时，停止自动流程并锁定运动。",
+        input: "ImageQualityNG、MarkFailed、CompensationInvalid、CalibrationError。",
+        output: "AlarmState、AutoRunLocked、OperatorNotice。",
+        technologies: ["异常分类", "补偿阈值", "报警状态机", "自动模式锁定", "人工提示"],
+        abnormalCases: ["连续识别失败", "补偿过大", "标定失效", "误报警", "强制跳过风险"],
+        relation: "安全分支阻止不可靠的视觉结果驱动真实机器；报警期间 MotionService 不发送 MoveAbs。",
+        interviewEnglish: "The system stops automatic motion when visual compensation is unreliable."
+      },
+      {
+        id: "retry-capture", title: "重拍或报警", shortLabel: "Retry Capture", branch: "retry",
+        businessPurpose: "图像质量 NG 或 Mark 识别失败时先重新采图；超过重试次数再升级为视觉报警。",
+        input: "retryCount、ImageQualityNG、MarkFailed、CameraStatus。",
+        output: "RetryCapture 或 VisionAlarm。",
+        technologies: ["重拍机制", "重试次数", "曝光调整", "光源控制", "异常升级"],
+        abnormalCases: ["重复模糊", "相机断线", "光源异常", "工件遮挡", "Mark 缺失"],
+        relation: "连接轻微视觉异常与报警；重拍会生成新的 frameId，旧帧对应的视觉与补偿数据必须作废。",
+        interviewEnglish: "The system retries image capture before raising a vision alarm."
+      },
+      {
+        id: "manual-reset", title: "人工处理与复位", shortLabel: "Manual Reset", branch: "retry",
+        businessPurpose: "操作员检查相机、光源、工件、治具和标定状态，排除问题后复位自动流程。",
+        input: "OperatorConfirm、CameraCheck、LightCheck、FixtureCheck、ResetCommand。",
+        output: "AlarmCleared；流程回到拍照位或 Ready。",
+        technologies: ["人工确认", "报警复位", "设备检查", "重新拍照", "必要时重新标定"],
+        abnormalCases: ["问题未解决", "复位后再次失败", "标定仍错误", "工件未放正"],
+        relation: "连接异常与正常流程。复位后必须重新采图，绝不能继续使用报警前生成的旧补偿量。",
+        interviewEnglish: "After checking the camera and part, the operator resets the vision compensation flow."
+      }
+    ];
+
+    const calibrationData = {
+      calibId: "CALIB-CAM-TO-STAGE-01",
+      scaleX_mmPerPixel: 0.025,
+      scaleY_mmPerPixel: 0.025,
+      cameraToStageRotation: 2.0,
+      cameraOriginInStageX: 120.0,
+      cameraOriginInStageY: 68.0,
+      calibrationStatus: "VALID"
+    };
+
+    const visionData = {
+      templateA: { x: 210, y: 155 }, templateB: { x: 360, y: 150 },
+      markA: { x: 222, y: 147 }, markB: { x: 372, y: 142 },
+      dxPixel: 12, dyPixel: -8, dtheta: 0.35, confidenceA: 0.982, confidenceB: 0.976
+    };
+
+    const compensationData = {
+      originalStartX: 128.500, originalStartY: 72.250, originalZ: 18.000,
+      dxMm: 0, dyMm: 0, dtheta: 0.35,
+      compensatedStartX: 128.500, compensatedStartY: 72.250, compensatedTheta: 0.35,
+      maxOffsetMm: 5.0
+    };
+
+    const axisData = {
+      current: { x: 0, y: 0, z: 0 },
+      target: { x: 0, y: 0, z: 0 },
+      servo: false, home: false, moving: false, motionDone: false, limit: false, alarm: false
+    };
+
+    const state = {
+      currentStep: 0,
+      currentNodeOverride: null,
+      selectedNodeId: "load-recipe-calibration",
+      resultMode: "Vision OK",
+      blurInjected: false,
+      largeOffset: false,
+      alarm: false,
+      retryCount: 0,
+      frameCounter: 1,
+      workpieceId: "WP-VISION-001",
+      frameId: "FRAME-001",
+      calibId: calibrationData.calibId,
+      visionResultId: "VR-MARK-001",
+      compensationId: "COMP-XYT-001",
+      motionCommandId: "CMD-COMP-MOVE-001",
+      traceId: "TRACE-VISION-MOTION-001",
+      visionState: "Idle",
+      motionState: "Idle",
+      coordinateState: "ImageCoordinate",
+      qualityResult: "Unknown",
+      dataValid: false,
+      completed: false
+    };
+
+    const animationSteps = [
+      { nodeId: "load-recipe-calibration", text: "加载产品配方、标准点位、模板 Mark 与相机—平台标定关系。", log: "Load recipe and camera-stage calibration.", visionState: "Idle", motionState: "Idle", coordinateState: "ImageCoordinate", qualityResult: "Unknown" },
+      { nodeId: "safety-home", text: "检查安全互锁，X/Y/Z 轴回到 Home Sensor，建立可信机械坐标。", log: "Motion axes homed. Machine coordinate is ready.", visionState: "Idle", motionState: "Ready", coordinateState: "MachineCoordinate", qualityResult: "Unknown" },
+      { nodeId: "workpiece-clamp", text: "工件进入治具，IO 确认到位后夹紧，绑定 workpieceId。", log: "Workpiece detected and clamped.", visionState: "Idle", motionState: "Ready", coordinateState: "MachineCoordinate", qualityResult: "Unknown" },
+      { nodeId: "move-camera-position", text: "MotionService 控制平台移动到拍照位，Z 轴保持安全高度。", log: "Move stage to camera position.", visionState: "Idle", motionState: "MovingToCameraPos", coordinateState: "MachineCoordinate", qualityResult: "Unknown" },
+      { nodeId: "capture-image", text: "平台到位后触发光源和相机，FRAME token 从 Camera 进入 IPC。", log: "Capture image FRAME-001.", visionState: "Capturing", motionState: "InCameraPosition", coordinateState: "ImageCoordinate", qualityResult: "Unknown" },
+      { nodeId: "image-quality", text: "检查亮度、模糊分数和 ROI；质量 NG 时停止定位并转入重拍。", log: "Image quality check passed.", visionState: "Processing", motionState: "InCameraPosition", coordinateState: "ImageCoordinate", qualityResult: "OK" },
+      { nodeId: "opencv-mark", text: "OpenCV 在 ROI 内检测两个 Mark，输出 pixelX / pixelY 与 confidence。", log: "Mark points detected.", visionState: "Located", motionState: "InCameraPosition", coordinateState: "ImageCoordinate", qualityResult: "OK" },
+      { nodeId: "calculate-pixel-offset", text: "比较实际 Mark 与模板 Mark：dx = +12 px，dy = -8 px，θ = +0.35°。", log: "Pixel offset and angle calculated.", visionState: "OffsetCalculated", motionState: "InCameraPosition", coordinateState: "ImageCoordinate", qualityResult: "OK" },
+      { nodeId: "pixel-to-machine", text: "先乘 mm/pixel 比例，再旋转到 Stage 坐标：pixel 不能直接作为轴位移。", log: "Convert pixel offset to machine offset.", visionState: "OffsetCalculated", motionState: "InCameraPosition", coordinateState: "MachineCoordinate", qualityResult: "OK" },
+      { nodeId: "generate-compensated-target", text: "把机械偏移与角度应用到标准点胶起点，生成补偿后的候选目标。", log: "Generate compensated target point.", visionState: "OffsetCalculated", motionState: "InCameraPosition", coordinateState: "Compensated", qualityResult: "OK" },
+      { nodeId: "validate-compensation", text: "检查软限位、最大补偿量、安全区和 Z 安全高度；无效目标绝不下发。", log: "Compensated target validation passed.", visionState: "OffsetCalculated", motionState: "InCameraPosition", coordinateState: "Compensated", qualityResult: "OK" },
+      { nodeId: "send-motion-command", text: "IPC → MotionService → Motion Card：发送补偿后的 MoveAbs 命令。", log: "Send compensated motion command.", visionState: "OffsetCalculated", motionState: "MovingToCompensatedStart", coordinateState: "Compensated", qualityResult: "OK" },
+      { nodeId: "move-compensated-start", text: "运动卡驱动伺服轴到补偿后的真实工件起点，并持续读取反馈位置。", log: "Move to compensated start point.", visionState: "OffsetCalculated", motionState: "MovingToCompensatedStart", coordinateState: "Compensated", qualityResult: "OK" },
+      { nodeId: "confirm-position", text: "反馈位置进入容差窗口，MotionDone 与 InPosition 同时成立。", log: "Axis reached compensated position.", visionState: "OffsetCalculated", motionState: "InPosition", coordinateState: "Compensated", qualityResult: "OK" },
+      { nodeId: "execute-process", text: "点胶针头在补偿后的真实边缘起点下降并执行 DispenseStart()。", log: "Process executed at corrected position.", visionState: "OffsetCalculated", motionState: "InPosition", coordinateState: "Compensated", qualityResult: "OK" },
+      { nodeId: "record-trace", text: "绑定工件、帧、视觉结果、补偿量、运动反馈与工艺结果，保存追溯记录。", log: "Save vision and motion compensation record.", visionState: "OffsetCalculated", motionState: "InPosition", coordinateState: "Compensated", qualityResult: "OK" },
+      { nodeId: "upload-mes-ready", text: "上传 MES，周期完成；设备回到 Ready，等待下一工件。", log: "MES upload OK. Machine returned to Ready.", visionState: "Idle", motionState: "Ready", coordinateState: "Calibrated", qualityResult: "OK" }
+    ];
+
+    let mainTimeline = null;
+    let fallbackTimer = null;
+    let branchTimer = null;
+    const STEP_DURATION = 2.25;
+
+    const $ = id => document.getElementById(id);
+    const setText = (id, value) => { const el = $(id); if (el) el.textContent = value; };
+    const fmt = (n, digits = 3) => Number(n).toFixed(digits);
+    const signed = (n, digits = 3) => `${Number(n) >= 0 ? "+" : ""}${Number(n).toFixed(digits)}`;
+
+    function setBadge(id, text, kind = "") {
+      const el = $(id);
+      if (!el) return;
+      el.textContent = text;
+      el.className = `mini-state ${kind}`.trim();
+    }
+
+    function computeCompensation() {
+      const px = state.largeOffset ? 2200 : visionData.dxPixel;
+      const py = state.largeOffset ? -1600 : visionData.dyPixel;
+      const sx = px * calibrationData.scaleX_mmPerPixel;
+      const sy = py * calibrationData.scaleY_mmPerPixel;
+      const rad = calibrationData.cameraToStageRotation * Math.PI / 180;
+      compensationData.dxMm = sx * Math.cos(rad) - sy * Math.sin(rad);
+      compensationData.dyMm = sx * Math.sin(rad) + sy * Math.cos(rad);
+      compensationData.compensatedStartX = compensationData.originalStartX + compensationData.dxMm;
+      compensationData.compensatedStartY = compensationData.originalStartY + compensationData.dyMm;
+      compensationData.compensatedTheta = compensationData.dtheta;
+    }
+
+    // Render the complete clickable business flow from data.
+    function renderFlowNodes() {
+      const normal = flowNodes.filter(n => n.branch === "normal");
+      const exception = flowNodes.filter(n => n.branch !== "normal");
+      const nodeHtml = node => {
+        const idx = flowNodes.indexOf(node) + 1;
+        return `<button class="flow-node ${node.branch}" id="flow-${node.id}" data-node-id="${node.id}" onclick="selectNode('${node.id}')">
+          <span class="flow-index">${String(idx).padStart(2, "0")}</span>
+          <span class="flow-title"><b>${node.title}</b><small>${node.shortLabel}</small></span>
+          <span class="flow-tag">${node.branch === "normal" ? "FLOW" : node.branch.toUpperCase()}</span>
+        </button>`;
+      };
+      $("normalFlowList").innerHTML = normal.map(nodeHtml).join("");
+      $("exceptionFlowList").innerHTML = exception.map(nodeHtml).join("");
+    }
+
+    // Select a node without altering the running machine state.
+    function selectNode(nodeId) {
+      const node = flowNodes.find(n => n.id === nodeId);
+      if (!node) return;
+      state.selectedNodeId = nodeId;
+      document.querySelectorAll(".flow-node").forEach(el => el.classList.toggle("selected", el.dataset.nodeId === nodeId));
+      setText("detailTitle", node.title);
+      setText("detailNodeBadge", `${String(flowNodes.indexOf(node) + 1).padStart(2, "0")} · ${node.shortLabel}`);
+      setText("detailPurpose", node.businessPurpose);
+      setText("detailInput", node.input);
+      setText("detailOutput", node.output);
+      setText("detailAbnormal", node.abnormalCases.join("；") + "。 ");
+      setText("detailRelation", node.relation);
+      setText("detailEnglish", node.interviewEnglish);
+      $("detailTechnologies").innerHTML = node.technologies.map(t => `<span>${t}</span>`).join("");
+    }
+
+    function clearBranchTimer() {
+      if (branchTimer) { clearTimeout(branchTimer); branchTimer = null; }
+    }
+
+    function scheduleBranch(nodeId, reason, type) {
+      clearBranchTimer();
+      branchTimer = setTimeout(() => branchTo(nodeId, reason, type), 850);
+    }
+
+    function branchTo(nodeId, reason, type = "retry") {
+      pauseAnimation();
+      state.currentNodeOverride = nodeId;
+      state.visionState = "Failed";
+      state.qualityResult = type === "alarm" ? "Alarm" : "NG";
+      if (type === "alarm") {
+        state.alarm = true;
+        state.motionState = "Alarm";
+        state.coordinateState = state.largeOffset ? "OutOfRange" : state.coordinateState;
+      }
+      updateAllViews();
+      appendLog(reason, type === "alarm" ? "error" : "warn");
+      moveFlowToken(nodeId);
+    }
+
+    // Advance the synchronized scene, debugger, flow, state cards and log.
+    function updateStep(stepIndex, options = {}) {
+      clearBranchTimer();
+      const i = Math.max(0, Math.min(animationSteps.length - 1, stepIndex));
+      const step = animationSteps[i];
+      state.currentStep = i;
+      state.currentNodeOverride = null;
+      state.visionState = step.visionState;
+      state.motionState = step.motionState;
+      state.coordinateState = step.coordinateState;
+      state.qualityResult = step.qualityResult;
+      state.completed = i === animationSteps.length - 1;
+      state.alarm = false;
+
+      if (i < 7) state.dataValid = false;
+      if (i >= 7) state.dataValid = true;
+
+      if (i === 5 && state.blurInjected) {
+        state.visionState = "Failed";
+        state.qualityResult = "NG";
+        state.dataValid = false;
+      }
+      if (i === 6 && state.resultMode === "Mark Failed") {
+        state.visionState = "Failed";
+        state.qualityResult = "NG";
+        state.dataValid = false;
+      }
+      if (i === 10 && (state.largeOffset || state.resultMode === "Compensation OutOfRange")) {
+        state.coordinateState = "OutOfRange";
+        state.motionState = "Alarm";
+        state.qualityResult = "Alarm";
+        state.alarm = true;
+      }
+
+      computeCompensation();
+      setText("stepCounter", `STEP ${String(i + 1).padStart(2, "0")} / ${animationSteps.length}`);
+      setText("currentStepText", step.text);
+      updateAllViews();
+      animateScene(i);
+      selectNode(step.nodeId);
+      moveFlowToken(step.nodeId);
+
+      let logMessage = step.log.replace("FRAME-001", state.frameId);
+      if (i === 5 && state.blurInjected) logMessage = "Image blur detected. Retry capture required.";
+      if (i === 6 && state.resultMode === "Mark Failed") logMessage = "Mark detection failed. Confidence is below threshold.";
+      if (i === 10 && state.alarm) logMessage = "Compensation offset is too large. Motion command rejected.";
+      appendLog(logMessage, state.alarm ? "error" : (state.qualityResult === "NG" ? "warn" : ""));
+
+      if (!options.suppressBranch) {
+        if (i === 5 && state.blurInjected) scheduleBranch("retry-capture", "Quality NG routed to RetryCapture().", "retry");
+        if (i === 6 && state.resultMode === "Mark Failed") scheduleBranch("retry-capture", "Mark failed. Old visual result is invalid.", "retry");
+        if (i === 10 && state.alarm) scheduleBranch("vision-alarm", "Compensation invalid. Auto motion locked.", "alarm");
+      }
+    }
+
+    function updateAllViews() {
+      updateStatusCards();
+      updateImageView();
+      updatePixelTable();
+      updateCalibrationCard();
+      updateCompensationTable();
+      updateAxisTable(true);
+      updateValidationCard();
+      updateCommandCard();
+      updateStateAndFinalCards();
+      updateFlowHighlight();
+      updateFactoryStaticState();
+    }
+
+    // Top-level business identifiers and state machine values.
+    function updateStatusCards() {
+      setText("sWorkpiece", state.workpieceId);
+      setText("sFrame", state.currentStep >= 4 || state.currentNodeOverride ? state.frameId : "PENDING");
+      setText("sCalib", state.calibId);
+      setText("sVisionResult", state.dataValid ? state.visionResultId : (state.visionState === "Failed" ? "INVALID" : "PENDING"));
+      setText("sCompensation", state.currentStep >= 9 && state.dataValid ? state.compensationId : (state.currentNodeOverride === "manual-reset" ? "DISCARDED" : "PENDING"));
+      setText("sMotionCommand", state.currentStep >= 11 && !state.alarm ? state.motionCommandId : "NOT SENT");
+      setText("sTrace", state.currentStep >= 15 ? state.traceId : "PENDING");
+      setText("sVisionState", state.visionState);
+      setText("sMotionState", state.motionState);
+      setText("sCoordinateState", state.coordinateState);
+      setText("sQualityResult", state.qualityResult);
+      const machineKnown = state.currentStep >= 8 && state.dataValid;
+      setText("sDx", machineKnown ? `${signed(compensationData.dxMm)} mm` : "—");
+      setText("sDy", machineKnown ? `${signed(compensationData.dyMm)} mm` : "—");
+      setText("sTheta", state.currentStep >= 7 && state.dataValid ? `${signed(compensationData.dtheta, 2)}°` : "—");
+      setText("sService", state.alarm ? "COMMAND REJECTED" : (state.currentStep >= 11 ? "MOVEABS ACTIVE" : "WAITING"));
+      setText("sFinal", state.completed ? "CYCLE COMPLETED" : (state.alarm ? "ALARM / LOCKED" : "IN PROGRESS"));
+
+      const mode = $("resultModeBadge");
+      const modeText = state.blurInjected ? "IMAGE BLUR" : state.resultMode.toUpperCase();
+      mode.textContent = modeText;
+      mode.className = `mode-badge ${(state.alarm || state.resultMode !== "Vision OK") ? "alarm" : (state.blurInjected ? "warn" : "")}`.trim();
+    }
+
+    // Update the camera window, quality gate and Mark result together.
+    function updateImageView() {
+      const i = state.currentStep;
+      const captured = i >= 4 || !!state.currentNodeOverride;
+      const qualityStage = i >= 5;
+      const markStage = i >= 6;
+      const offsetStage = i >= 7 && state.dataValid;
+      const markFailed = state.resultMode === "Mark Failed" && i >= 6;
+      const screen = $("cameraScreen");
+      screen.classList.toggle("blur", state.blurInjected && i >= 5);
+      screen.classList.toggle("failed", markFailed);
+      screen.classList.toggle("scanning", i === 5 && !state.currentNodeOverride);
+      setText("imageFrameText", captured ? state.frameId : "NO FRAME");
+      $("cameraActualGroup").style.opacity = captured ? "1" : ".16";
+      $("cameraActualGroup").setAttribute("transform", offsetStage ? "translate(10 -6) rotate(0.35 271 120)" : "translate(0 0)");
+      document.querySelectorAll(".detect-box").forEach(el => el.style.opacity = markStage && !markFailed && !state.blurInjected ? "1" : "0");
+      $("imageOffsetArrow").classList.toggle("hidden", !offsetStage);
+      $("imageOffsetText").classList.toggle("hidden", !offsetStage);
+      setText("imageOffsetText", state.largeOffset ? "dx +2200 px · dy -1600 px · θ +0.35°" : "dx +12 px · dy -8 px · θ +0.35°");
+
+      if (!captured) { setText("imageResultText", "WAIT"); setBadge("imageStateBadge", "WAITING"); }
+      else if (state.blurInjected && i >= 5) { setText("imageResultText", "BLUR NG"); setBadge("imageStateBadge", "IMAGE NG", "ng"); }
+      else if (markFailed) { setText("imageResultText", "MARK NG"); setBadge("imageStateBadge", "LOCATE FAILED", "ng"); }
+      else { setText("imageResultText", markStage ? "VISION OK" : "RAW FRAME"); setBadge("imageStateBadge", markStage ? "LOCATED" : "CAPTURED", markStage ? "ok" : ""); }
+
+      setText("qBrightness", qualityStage ? "132 / OK" : "—");
+      setText("qBlur", qualityStage ? (state.blurInjected ? "18.4 / NG" : "186.7 / OK") : "—");
+      setText("qRoi", qualityStage ? "100% / OK" : "—");
+      ["qBrightness", "qBlur", "qRoi"].forEach(id => { const el = $(id); el.className = `v ${qualityStage ? "ok" : ""}`; });
+      if (state.blurInjected && qualityStage) $("qBlur").className = "v ng";
+      setBadge("qualityBadge", !qualityStage ? "UNKNOWN" : (state.blurInjected ? "NG" : "OK"), !qualityStage ? "" : (state.blurInjected ? "ng" : "ok"));
+
+      const located = markStage && !markFailed && !state.blurInjected;
+      setText("mConfA", markStage ? (located ? visionData.confidenceA.toFixed(3) : "0.214 / LOW") : "—");
+      setText("mConfB", markStage ? (located ? visionData.confidenceB.toFixed(3) : "0.000 / LOST") : "—");
+      setText("mCentroid", located ? "(297, 145) px" : "—");
+      ["mConfA", "mConfB"].forEach(id => { $(id).className = `v ${located ? "ok" : (markStage ? "ng" : "")}`; });
+      setBadge("markBadge", !markStage ? "WAITING" : (located ? "2 / 2 FOUND" : "FAILED"), !markStage ? "" : (located ? "ok" : "ng"));
+    }
+
+    // Pixel coordinates remain explicitly in image units.
+    function updatePixelTable() {
+      const detected = state.currentStep >= 6 && state.dataValid;
+      const offsetKnown = state.currentStep >= 7 && state.dataValid;
+      const rows = [
+        ["MarkA_pixelX", detected ? visionData.markA.x : "—"], ["MarkA_pixelY", detected ? visionData.markA.y : "—"],
+        ["MarkB_pixelX", detected ? visionData.markB.x : "—"], ["MarkB_pixelY", detected ? visionData.markB.y : "—"],
+        ["templateA_pixelX", visionData.templateA.x], ["templateA_pixelY", visionData.templateA.y],
+        ["templateB_pixelX", visionData.templateB.x], ["templateB_pixelY", visionData.templateB.y],
+        ["dx_pixel", offsetKnown ? (state.largeOffset ? "+2200 px" : "+12 px") : "—"],
+        ["dy_pixel", offsetKnown ? (state.largeOffset ? "-1600 px" : "-8 px") : "—"],
+        ["dtheta_deg", offsetKnown ? "+0.35°" : "—"]
+      ];
+      $("pixelTableBody").innerHTML = rows.map(([k,v]) => `<tr><th>${k}</th><td class="num">${v}</td></tr>`).join("");
+      setBadge("pixelBadge", offsetKnown ? "OFFSET READY" : "IMAGE COORD", offsetKnown ? "ok" : "");
+    }
+
+    function updateCalibrationCard() {
+      const rows = [
+        ["calibId", calibrationData.calibId],
+        ["scaleX_mmPerPixel", `${calibrationData.scaleX_mmPerPixel} mm/px`],
+        ["scaleY_mmPerPixel", `${calibrationData.scaleY_mmPerPixel} mm/px`],
+        ["cameraToStageRotation", `${calibrationData.cameraToStageRotation.toFixed(2)}°`],
+        ["cameraOriginInStageX", `${calibrationData.cameraOriginInStageX.toFixed(3)} mm`],
+        ["cameraOriginInStageY", `${calibrationData.cameraOriginInStageY.toFixed(3)} mm`],
+        ["calibrationStatus", calibrationData.calibrationStatus]
+      ];
+      $("calibrationTableBody").innerHTML = rows.map(([k,v]) => `<tr><th>${k}</th><td class="num">${v}</td></tr>`).join("");
+      setBadge("calibrationBadge", "VALID", "ok");
+    }
+
+    function updateFormulaFlow() {
+      const stage = state.currentStep < 7 ? -1 : (state.currentStep === 7 ? 0 : (state.currentStep === 8 ? 3 : 4));
+      document.querySelectorAll("[data-formula]").forEach(el => el.classList.toggle("active", Number(el.dataset.formula) <= stage));
+      const boxes = document.querySelectorAll("[data-formula]");
+      boxes[0].innerHTML = `${state.largeOffset ? "[+2200, -1600]" : "[+12, -8]"}<br>pixel offset`;
+      boxes[3].innerHTML = `${state.currentStep >= 8 && state.dataValid ? `[${signed(compensationData.dxMm)}, ${signed(compensationData.dyMm)}]` : "[—, —]"}<br>machine offset`;
+      setBadge("formulaBadge", state.currentStep >= 8 ? "CALIBRATED" : "PIXEL → MACHINE", state.currentStep >= 8 ? "ok" : "");
+    }
+
+    // Mechanical compensation values are displayed only after calibration conversion.
+    function updateCompensationTable() {
+      updateFormulaFlow();
+      const machineKnown = state.currentStep >= 8 && state.dataValid;
+      const targetKnown = state.currentStep >= 9 && state.dataValid;
+      const rows = [
+        ["dx_mm", machineKnown ? `${signed(compensationData.dxMm)} mm` : "—"],
+        ["dy_mm", machineKnown ? `${signed(compensationData.dyMm)} mm` : "—"],
+        ["dtheta_deg", machineKnown ? `${signed(compensationData.dtheta, 2)}°` : "—"],
+        ["originalStartX", `${fmt(compensationData.originalStartX)} mm`],
+        ["originalStartY", `${fmt(compensationData.originalStartY)} mm`],
+        ["compensatedStartX", targetKnown ? `${fmt(compensationData.compensatedStartX)} mm` : "—"],
+        ["compensatedStartY", targetKnown ? `${fmt(compensationData.compensatedStartY)} mm` : "—"],
+        ["compensatedTheta", targetKnown ? `${signed(compensationData.compensatedTheta, 2)}°` : "—"]
+      ];
+      $("compensationTableBody").innerHTML = rows.map(([k,v]) => `<tr><th>${k}</th><td class="num">${v}</td></tr>`).join("");
+      setBadge("compensationBadge", !machineKnown ? "WAITING" : (state.alarm ? "INVALID" : (targetKnown ? "TARGET READY" : "MM OFFSET")), !machineKnown ? "" : (state.alarm ? "ng" : "ok"));
+
+      const point = $("compareCompPoint");
+      if (state.largeOffset && targetKnown) { point.style.left = "94%"; point.style.top = "8%"; }
+      else { point.style.left = targetKnown ? "61%" : "36%"; point.style.top = targetKnown ? "41%" : "58%"; }
+      $("compareArrow").style.opacity = targetKnown ? "1" : ".15";
+    }
+
+    function desiredAxisTarget() {
+      const i = state.currentStep;
+      if (i < 1) return { x: 0, y: 0, z: 0 };
+      if (i < 3) return { x: 0, y: 0, z: 0 };
+      if (i < 11 || state.alarm) return { x: 80, y: 45, z: 35 };
+      if (i < 14) return { x: compensationData.compensatedStartX, y: compensationData.compensatedStartY, z: 18 };
+      return { x: compensationData.compensatedStartX, y: compensationData.compensatedStartY, z: 2.5 };
+    }
+
+    function renderAxisRows() {
+      const moving = [3, 12].includes(state.currentStep) && !state.alarm;
+      const rows = [
+        ["X", axisData.current.x, axisData.target.x],
+        ["Y", axisData.current.y, axisData.target.y],
+        ["Z", axisData.current.z, axisData.target.z]
+      ];
+      $("axisTableBody").innerHTML = rows.map(([axis, current, target]) => `<tr>
+        <td>${axis}</td><td>${fmt(current)} mm</td><td>${fmt(target)} mm</td>
+        <td>${axisData.servo ? "ON" : "OFF"}</td><td>${axisData.home ? "DONE" : "—"}</td>
+        <td>${moving ? "false" : (axisData.motionDone ? "true" : "—")}</td>
+        <td>${axisData.limit ? "ON" : "OFF"}</td><td>${axisData.alarm ? "ALARM" : "NONE"}</td>
+      </tr>`).join("");
+    }
+
+    // Animate axis feedback values toward each step's command target.
+    function updateAxisTable(animate = false) {
+      const i = state.currentStep;
+      const target = desiredAxisTarget();
+      axisData.target = { ...target };
+      axisData.servo = i >= 1;
+      axisData.home = i >= 1;
+      axisData.moving = [3, 12].includes(i) && !state.alarm;
+      axisData.motionDone = i >= 1 && !axisData.moving && !state.alarm;
+      axisData.limit = state.alarm && state.largeOffset;
+      axisData.alarm = state.alarm;
+
+      if (window.gsap && animate && [1, 3, 12, 14].includes(i) && !state.alarm) {
+        gsap.killTweensOf(axisData.current);
+        gsap.to(axisData.current, { x: target.x, y: target.y, z: target.z, duration: .85, ease: "power2.inOut", onUpdate: renderAxisRows, onComplete: () => { axisData.motionDone = true; renderAxisRows(); } });
+      } else if (!axisData.moving || state.alarm) {
+        if (i === 1 || i >= 13) axisData.current = { ...target };
+        renderAxisRows();
+      } else renderAxisRows();
+
+      setBadge("axisBadge", state.alarm ? "ALARM" : (axisData.moving ? "MOVING" : (axisData.home ? "SERVO ON · HOME" : "SERVO OFF")), state.alarm ? "ng" : (axisData.home ? "ok" : ""));
+    }
+
+    // Validate soft limits, process thresholds and safe zone before command dispatch.
+    function updateValidationCard() {
+      const started = state.currentStep >= 10 || state.currentNodeOverride === "vision-alarm";
+      const invalid = state.alarm && state.largeOffset;
+      const checks = !started ? [["SoftLimit", "WAIT"], ["MaxOffset ≤ 5.0 mm", "WAIT"], ["SafeZone / Z Height", "WAIT"]]
+        : invalid ? [["SoftLimit", "NG"], ["MaxOffset ≤ 5.0 mm", "NG"], ["Command", "REJECTED"]]
+        : [["SoftLimit", "OK"], ["MaxOffset ≤ 5.0 mm", "OK"], ["SafeZone / Z Height", "OK"]];
+      $("validationList").innerHTML = checks.map(([k,v]) => `<div class="validation-row"><span>${k}</span><b class="${(v === "NG" || v === "REJECTED") ? "ng" : ""}">${v}</b></div>`).join("");
+      setBadge("validationBadge", !started ? "WAITING" : (invalid ? "COMMAND REJECTED" : "VALID"), !started ? "" : (invalid ? "ng" : "ok"));
+    }
+
+    function updateCommandCard() {
+      const i = state.currentStep;
+      let code = "MotionService.WaitForRecipe();";
+      if (i === 0) code = `RecipeService.Load(\"DISPENSE-SHELL-A\");\nCalibration.Load(\"${state.calibId}\");`;
+      else if (i === 1) code = "MotionService.HomeAsync(Axis.XYZ);";
+      else if (i === 2) code = "IoService.Clamp(workpieceId, true);";
+      else if (i === 3) code = "MotionService.MoveToCameraPosition(safeZ: 35.0);";
+      else if (i === 4) code = `CameraService.Trigger(\"${state.frameId}\");`;
+      else if (i === 5) code = state.blurInjected ? "VisionService.QualityGate() => NG;\nRetryCapture();" : "VisionService.QualityGate() => OK;";
+      else if (i === 6) code = state.resultMode === "Mark Failed" ? "OpenCV.FindMarks() => confidence LOW;\nRejectVisionResult();" : "OpenCV.FindMarks(roi, template) => MarkA, MarkB;";
+      else if (i === 7) code = "VisionMath.Offset(actualMarks, templateMarks);\n=> dx=+12 px, dy=-8 px, θ=+0.35°";
+      else if (i === 8) code = "MachineOffset = R(cameraToStage) × Scale × PixelOffset;";
+      else if (i === 9) code = "Target' = R(θ) × OriginalTarget + MachineOffset;";
+      else if (i === 10) code = state.alarm ? "Validate(Target') => OUT_OF_RANGE;\nMotion command REJECTED;" : "Validate(Target') => SoftLimit OK / MaxOffset OK;";
+      else if (i === 11) code = `MotionService.MoveAbs({\n  X:${fmt(compensationData.compensatedStartX)}, Y:${fmt(compensationData.compensatedStartY)}, Z:18.000\n});`;
+      else if (i === 12) code = "MotionCard.Execute(CMD-COMP-MOVE-001);\nReadAxisFeedback();";
+      else if (i === 13) code = "InPosition = abs(CommandPos - FeedbackPos) < 0.010;";
+      else if (i === 14) code = "ProcessService.DispenseStart();";
+      else if (i === 15) code = "TraceRepository.Save(TRACE-VISION-MOTION-001);";
+      else if (i === 16) code = "MesClient.Upload(traceRecord);\nStateMachine.SetReady();";
+      if (state.currentNodeOverride === "retry-capture") code = "CurrentAction = RetryCapture();\nDiscard(oldVisionResult, oldCompensation);";
+      if (state.currentNodeOverride === "vision-alarm") code = "AutoRunLocked = true;\nMotionService.RejectCommand();";
+      if (state.currentNodeOverride === "manual-reset") code = "Alarm.Clear();\nDiscard(oldCompensation);\nRequireNewCapture();";
+      setText("commandCode", code);
+      setBadge("commandBadge", state.alarm ? "REJECTED" : (i >= 11 ? "EXECUTING" : "PREPARING"), state.alarm ? "ng" : (i >= 11 ? "ok" : ""));
+    }
+
+    function updateStateAndFinalCards() {
+      const rows = [
+        ["visionState", state.visionState], ["motionState", state.motionState],
+        ["coordinateState", state.coordinateState], ["qualityResult", state.qualityResult]
+      ];
+      $("currentStateCard").innerHTML = `<table class="kv-table">${rows.map(([k,v]) => `<tr><th>${k}</th><td class="num">${v}</td></tr>`).join("")}</table>`;
+      setBadge("stateMachineBadge", state.alarm ? "ALARM" : state.motionState.toUpperCase(), state.alarm ? "ng" : (state.completed ? "ok" : ""));
+      setText("recipeMetric", state.currentStep >= 0 ? "LOADED" : "—");
+      setText("clampMetric", state.currentStep >= 2 ? "ON / LOCKED" : "OFF / OFF");
+      setText("processMetric", state.currentStep >= 15 ? "DONE / SAVED" : (state.currentStep >= 14 ? "DONE / WAIT" : "WAIT / WAIT"));
+      setBadge("ioBadge", state.alarm ? "LOCKED" : (state.currentStep >= 2 ? "IO READY" : "LOADING"), state.alarm ? "ng" : (state.currentStep >= 2 ? "ok" : ""));
+
+      const orb = $("resultOrb");
+      if (state.completed) {
+        orb.className = "result-orb ok"; orb.textContent = "OK";
+        setText("finalTitle", "Cycle Completed · Vision Compensation OK");
+        setText("finalDescription", `${state.workpieceId} 已完成视觉定位、${signed(compensationData.dxMm)} / ${signed(compensationData.dyMm)} mm 补偿、点胶与 MES 上传。`);
+        setBadge("finalBadge", "CYCLE COMPLETED", "ok");
+      } else if (state.alarm || state.qualityResult === "NG") {
+        orb.className = "result-orb ng"; orb.textContent = state.alarm ? "ALARM" : "NG";
+        setText("finalTitle", state.alarm ? "Automatic motion locked" : "Vision result rejected");
+        setText("finalDescription", state.alarm ? "补偿无效或视觉不可靠，运动命令未发送；需要人工处理、复位并重新采图。" : "当前图像或 Mark 结果不可靠，旧视觉结果与旧补偿量不可继续使用。");
+        setBadge("finalBadge", state.alarm ? "ALARM" : "RETRY REQUIRED", "ng");
+      } else {
+        orb.className = "result-orb"; orb.textContent = "WAIT";
+        setText("finalTitle", "Cycle in progress");
+        setText("finalDescription", "视觉偏移正在经历标定转换、目标合法性检查与 MotionService 执行闭环。");
+        setBadge("finalBadge", "IN PROGRESS");
+      }
+    }
+
+    function updateFlowHighlight() {
+      const activeId = state.currentNodeOverride || animationSteps[state.currentStep].nodeId;
+      document.querySelectorAll(".flow-node").forEach(el => {
+        const node = flowNodes.find(n => n.id === el.dataset.nodeId);
+        el.classList.toggle("current", el.dataset.nodeId === activeId);
+        const normalIndex = flowNodes.filter(n => n.branch === "normal").findIndex(n => n.id === el.dataset.nodeId);
+        el.classList.toggle("done", node?.branch === "normal" && normalIndex >= 0 && normalIndex < state.currentStep);
+      });
+    }
+
+    function moveFlowToken(nodeId) {
+      requestAnimationFrame(() => {
+        const wrap = $("flowWrap");
+        const node = $(`flow-${nodeId}`);
+        const token = $("flowToken");
+        if (!wrap || !node || !token) return;
+        const wr = wrap.getBoundingClientRect();
+        const nr = node.getBoundingClientRect();
+        const top = nr.top - wr.top + wrap.scrollTop + nr.height / 2 - 7;
+        const label = state.currentStep < 7 ? "FRAME" : (state.currentStep < 9 ? "VISION" : (state.currentStep < 11 ? "COMP" : "CMD"));
+        token.textContent = state.currentNodeOverride === "vision-alarm" ? "ALARM" : label;
+        if (window.gsap) gsap.to(token, { top, duration: .45, ease: "power2.out" });
+        else token.style.top = `${top}px`;
+        if (nr.top < wr.top + 55 || nr.bottom > wr.bottom - 25) node.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
+    }
+
+    function updateFactoryStaticState() {
+      const i = state.currentStep;
+      setText("hmiRecipeText", i >= 0 ? "recipe: DISPENSE-A" : "recipe: —");
+      setText("hmiCalibText", i >= 0 ? "calib: ...STAGE-01" : "calib: —");
+      setText("hmiStateText", `STATE: ${state.alarm ? "ALARM" : state.motionState.toUpperCase()}`);
+      $("homeSensor").classList.toggle("on", i >= 1);
+      $("limitSensor").classList.toggle("on", state.alarm && state.largeOffset);
+      $("alarmLamp").classList.toggle("on", state.alarm || state.qualityResult === "NG");
+      $("readyLamp").classList.toggle("on", state.completed || state.motionState === "Ready");
+      $("safeZone").classList.toggle("invalid", state.alarm && state.largeOffset);
+      setText("resultAreaText", `OK / NG : ${state.completed ? "OK" : (state.alarm || state.qualityResult === "NG" ? "NG" : "—")}`);
+      setText("mesText", state.completed ? "UPLOAD OK" : (i >= 15 ? "SAVING..." : "TRACE WAIT"));
+
+      const actualTransform = i >= 7 && state.dataValid ? (state.largeOffset ? "translate(54 -34) rotate(4 490 542)" : "translate(10 -6) rotate(0.35 490 542)") : "translate(0 0)";
+      $("leftActualWorkpiece").setAttribute("transform", actualTransform);
+      $("coordBridge").classList.toggle("hidden", i < 8 || !state.dataValid);
+      setText("bridgeValue", i >= 8 ? `${signed(compensationData.dxMm)} / ${signed(compensationData.dyMm)} mm` : "scale + rotate");
+      const targetVisible = i >= 9 && state.dataValid;
+      $("leftOriginalTarget").classList.toggle("hidden", !targetVisible);
+      $("leftCompTarget").classList.toggle("hidden", !targetVisible);
+      $("leftCompArrow").classList.toggle("hidden", !targetVisible);
+      if (state.largeOffset && targetVisible) { $("leftCompTarget").setAttribute("cx", "620"); $("leftCompTarget").setAttribute("cy", "456"); $("leftCompArrow").setAttribute("d", "M449 530 L615 459"); }
+      else { $("leftCompTarget").setAttribute("cx", "460"); $("leftCompTarget").setAttribute("cy", "524"); $("leftCompArrow").setAttribute("d", "M449 530 L459 525"); }
+    }
+
+    function resetSceneTransient() {
+      ["frameToken", "commandPulse", "feedbackPulse", "traceToken", "glueDrop", "glueLine"].forEach(id => $(id).classList.add("hidden"));
+      $("ringLight").setAttribute("stroke", "#618397");
+      $("cameraBody").setAttribute("stroke", (state.blurInjected || state.resultMode === "Mark Failed") ? "#ff5d6c" : "#3e718c");
+    }
+
+    // Step-specific GSAP theater motion: capture, command, feedback, process and trace tokens.
+    function animateScene(i) {
+      resetSceneTransient();
+      if (!window.gsap) return;
+      gsap.killTweensOf(["#movingPlatform", "#toolHead", "#frameToken", "#commandPulse", "#feedbackPulse", "#traceToken"]);
+
+      if (i === 0) gsap.fromTo("#ipcDevice", { opacity: .45 }, { opacity: 1, duration: .7, filter: "drop-shadow(0 0 10px rgba(34,211,238,.35))" });
+      if (i === 1) {
+        gsap.fromTo("#movingPlatform", { x: 34, y: -12 }, { x: 0, y: 0, duration: 1, ease: "power2.inOut" });
+        gsap.fromTo("#homeSensor", { opacity: .25 }, { opacity: 1, repeat: 3, yoyo: true, duration: .2 });
+      }
+      if (i === 2) {
+        gsap.fromTo("#leftActualWorkpiece", { x: 100, opacity: .2 }, { x: 0, opacity: 1, duration: .8, ease: "back.out(1.4)" });
+        gsap.fromTo("#clampLeft", { x: -15 }, { x: 0, duration: .55 });
+        gsap.fromTo("#clampRight", { x: 15 }, { x: 0, duration: .55 });
+      }
+      if (i === 3) gsap.fromTo("#movingPlatform", { x: 42, y: 18 }, { x: 0, y: 0, duration: 1.05, ease: "power2.inOut" });
+      if (i === 4) {
+        $("frameToken").classList.remove("hidden");
+        gsap.fromTo("#ringLight", { attr: { stroke: "#618397" }, filter: "none" }, { attr: { stroke: "#e8ffff" }, filter: "drop-shadow(0 0 12px #22d3ee)", repeat: 3, yoyo: true, duration: .14 });
+        gsap.fromTo("#frameToken", { x: 350, y: 175, opacity: 1 }, { x: 105, y: 112, opacity: .15, duration: 1.15, ease: "power2.inOut", onComplete: () => $("frameToken").classList.add("hidden") });
+      }
+      if (i === 6 && state.dataValid) gsap.fromTo(".mark-dot", { scale: .2, transformOrigin: "center" }, { scale: 1, duration: .45, stagger: .12, ease: "back.out(2)" });
+      if (i === 8) gsap.fromTo("#coordBridge", { opacity: 0, scale: .92, transformOrigin: "center" }, { opacity: 1, scale: 1, duration: .55 });
+      if (i === 9) gsap.fromTo("#leftCompTarget", { scale: .2, transformOrigin: "center" }, { scale: 1, duration: .5, ease: "back.out(2)" });
+      if (i === 10) gsap.fromTo("#safeZone", { opacity: .35 }, { opacity: 1, repeat: 3, yoyo: true, duration: .2 });
+      if (i === 11 && !state.alarm) {
+        $("commandPulse").classList.remove("hidden");
+        gsap.timeline().set("#commandPulse", { x: 112, y: 180, opacity: 1 })
+          .to("#commandPulse", { x: 108, y: 352, duration: .38 })
+          .to("#commandPulse", { x: 168, y: 444, duration: .34 })
+          .to("#commandPulse", { x: 365, y: 505, duration: .48, onComplete: () => $("commandPulse").classList.add("hidden") });
+      }
+      if (i === 12 && !state.alarm) {
+        gsap.fromTo("#movingPlatform", { x: -9, y: 6 }, { x: 0, y: 0, duration: 1.05, ease: "power2.inOut" });
+        gsap.fromTo("#toolHead", { x: -10, y: 6 }, { x: 0, y: 0, duration: 1.05, ease: "power2.inOut" });
+      }
+      if (i === 13) {
+        $("feedbackPulse").classList.remove("hidden");
+        gsap.fromTo("#feedbackPulse", { x: 500, y: 520, opacity: 1 }, { x: 113, y: 175, opacity: .15, duration: 1.05, onComplete: () => $("feedbackPulse").classList.add("hidden") });
+      }
+      if (i === 14) {
+        $("glueDrop").classList.remove("hidden"); $("glueLine").classList.remove("hidden");
+        gsap.timeline().to("#toolHead", { y: 12, duration: .35, ease: "power2.inOut" }).fromTo("#glueLine", { opacity: 0, strokeDasharray: "1 220", strokeDashoffset: 220 }, { opacity: 1, strokeDasharray: "220 1", strokeDashoffset: 0, duration: .45 }).to("#toolHead", { y: 0, duration: .35 });
+      }
+      if (i === 15) {
+        $("traceToken").classList.remove("hidden");
+        gsap.fromTo("#traceToken", { x: 115, y: 145, opacity: 1 }, { x: 613, y: 93, opacity: .3, duration: 1.2, ease: "power2.inOut", onComplete: () => $("traceToken").classList.add("hidden") });
+      }
+      if (i === 16) gsap.fromTo("#readyLamp", { scale: .5, transformOrigin: "center" }, { scale: 1, repeat: 3, yoyo: true, duration: .25 });
+    }
+
+    // Timestamped teaching log shared by normal and abnormal branches.
+    function appendLog(message, level = "") {
+      const log = $("logWindow");
+      const now = new Date();
+      const time = now.toLocaleTimeString("zh-CN", { hour12: false });
+      const idx = log.children.length + 1;
+      const line = document.createElement("div");
+      line.className = `log-line ${level}`.trim();
+      line.innerHTML = `<span class="time">${time}</span> <span class="idx">#${String(idx).padStart(2, "0")}</span> ${message}`;
+      log.appendChild(line);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    // A master GSAP timeline calls the same updateStep function used by manual stepping.
+    function buildTimeline() {
+      if (!window.gsap) return null;
+      if (mainTimeline) mainTimeline.kill();
+      mainTimeline = gsap.timeline({ paused: true });
+      animationSteps.forEach((_, i) => mainTimeline.call(() => updateStep(i), null, i * STEP_DURATION));
+      mainTimeline.to({}, { duration: .1 }, animationSteps.length * STEP_DURATION);
+      return mainTimeline;
+    }
+
+    function playAnimation() {
+      clearBranchTimer();
+      if (state.currentNodeOverride === "vision-alarm") { appendLog("Auto run is locked. Reset Alarm is required.", "error"); return; }
+      if (state.currentNodeOverride === "retry-capture") retryCapture();
+      if (state.currentNodeOverride === "manual-reset") updateStep(4);
+      if (!window.gsap) {
+        clearInterval(fallbackTimer);
+        fallbackTimer = setInterval(() => {
+          if (state.completed || state.alarm || state.currentNodeOverride) { pauseAnimation(); return; }
+          stepNext();
+        }, STEP_DURATION * 1000);
+        appendLog("Animation playback started (timed fallback).", "warn");
+        return;
+      }
+      if (!mainTimeline) buildTimeline();
+      if (state.completed) restartAnimation();
+      const t = Math.min(mainTimeline.duration() - .05, state.currentStep * STEP_DURATION + .03);
+      mainTimeline.seek(t, true).play();
+      appendLog("Animation playback started.");
+    }
+
+    function pauseAnimation() {
+      if (mainTimeline) mainTimeline.pause();
+      if (fallbackTimer) { clearInterval(fallbackTimer); fallbackTimer = null; }
+    }
+
+    function restartAnimation() {
+      pauseAnimation(); clearBranchTimer();
+      state.resultMode = "Vision OK"; state.blurInjected = false; state.largeOffset = false; state.alarm = false;
+      state.retryCount = 0; state.frameCounter = 1; state.frameId = "FRAME-001"; state.dataValid = false; state.completed = false;
+      state.visionResultId = "VR-MARK-001"; state.compensationId = "COMP-XYT-001";
+      axisData.current = { x: 0, y: 0, z: 0 }; axisData.target = { x: 0, y: 0, z: 0 };
+      $("logWindow").innerHTML = "";
+      updateStep(0, { suppressBranch: true });
+      buildTimeline();
+      appendLog("Animation restarted. All transient compensation data cleared.");
+    }
+
+    function stepNext() {
+      pauseAnimation(); clearBranchTimer();
+      if (state.currentNodeOverride === "retry-capture") { retryCapture(); return; }
+      if (state.currentNodeOverride === "vision-alarm") { appendLog("Step blocked by alarm. Use Reset Alarm before a new capture.", "error"); return; }
+      if (state.currentNodeOverride === "manual-reset") { updateStep(4); return; }
+      if (state.currentStep === 5 && state.blurInjected) { branchTo("retry-capture", "Blur NG → Retry Capture branch.", "retry"); return; }
+      if (state.currentStep === 6 && state.resultMode === "Mark Failed") { branchTo("retry-capture", "Mark Failed → Retry Capture branch.", "retry"); return; }
+      if (state.currentStep === 10 && (state.largeOffset || state.resultMode === "Compensation OutOfRange")) { branchTo("vision-alarm", "OutOfRange → Vision Alarm branch.", "alarm"); return; }
+      updateStep(Math.min(state.currentStep + 1, animationSteps.length - 1));
+    }
+
+    function toggleResult() {
+      pauseAnimation(); clearBranchTimer();
+      const modes = ["Vision OK", "Mark Failed", "Compensation OutOfRange"];
+      state.resultMode = modes[(modes.indexOf(state.resultMode) + 1) % modes.length];
+      state.blurInjected = false; state.largeOffset = state.resultMode === "Compensation OutOfRange"; state.alarm = false;
+      appendLog(`Result mode changed to ${state.resultMode}.`, state.resultMode === "Vision OK" ? "" : "warn");
+      if (state.resultMode === "Vision OK") updateStep(Math.min(state.currentStep, 6), { suppressBranch: true });
+      else if (state.resultMode === "Mark Failed") updateStep(6);
+      else updateStep(10);
+    }
+
+    function injectBlurImage() {
+      pauseAnimation(); clearBranchTimer();
+      state.blurInjected = true; state.largeOffset = false; state.resultMode = "Vision OK"; state.alarm = false;
+      updateStep(5);
+    }
+
+    function injectLargeOffset() {
+      pauseAnimation(); clearBranchTimer();
+      state.largeOffset = true; state.blurInjected = false; state.resultMode = "Compensation OutOfRange";
+      updateStep(10);
+    }
+
+    function retryCapture() {
+      pauseAnimation(); clearBranchTimer();
+      state.retryCount += 1; state.frameCounter += 1;
+      state.frameId = `FRAME-${String(state.frameCounter).padStart(3, "0")}`;
+      state.visionResultId = `VR-MARK-${String(state.frameCounter).padStart(3, "0")}`;
+      state.compensationId = `COMP-XYT-${String(state.frameCounter).padStart(3, "0")}`;
+      state.blurInjected = false; state.largeOffset = false; state.resultMode = "Vision OK"; state.alarm = false; state.dataValid = false;
+      updateStep(4, { suppressBranch: true });
+      appendLog(`Retry image capture. New frame is ${state.frameId}; old compensation discarded.`, "warn");
+    }
+
+    function resetAlarm() {
+      pauseAnimation(); clearBranchTimer();
+      state.blurInjected = false; state.largeOffset = false; state.resultMode = "Vision OK"; state.alarm = false; state.completed = false;
+      state.currentStep = 3; state.currentNodeOverride = "manual-reset"; state.visionState = "Idle"; state.motionState = "Ready";
+      state.coordinateState = "ImageCoordinate"; state.qualityResult = "Unknown"; state.dataValid = false;
+      computeCompensation(); updateAllViews(); animateScene(3); selectNode("manual-reset"); moveFlowToken("manual-reset");
+      appendLog("Alarm reset. Previous compensation data discarded. New capture is required.", "warn");
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+      renderFlowNodes();
+      computeCompensation();
+      updateCalibrationCard();
+      selectNode("load-recipe-calibration");
+      updateStep(0, { suppressBranch: true });
+      buildTimeline();
+      appendLog("Teaching theater initialized. Use Play or Step Next.");
+    });
+  </script>
+</body>
+</html>
