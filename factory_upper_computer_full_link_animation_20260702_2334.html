@@ -1,0 +1,967 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="dark" />
+  <title>工业工厂上位机全链路业务运行模拟器</title>
+  <!-- 文件时间戳来自本机当前时间：2026-07-02 23:34（Asia/Shanghai）。 -->
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+  <style>
+    :root {
+      --bg: #06101d;
+      --panel: rgba(10, 27, 45, .88);
+      --panel-2: rgba(14, 35, 57, .94);
+      --line: rgba(118, 173, 211, .26);
+      --text: #e8f4ff;
+      --muted: #8da9bd;
+      --cyan: #35d9ff;
+      --blue: #4c8dff;
+      --green: #42e6a4;
+      --yellow: #ffd166;
+      --orange: #ff9f43;
+      --red: #ff596e;
+      --purple: #bb7dff;
+      --shadow: 0 18px 48px rgba(0, 0, 0, .28);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      min-width: 1180px;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 50% -10%, rgba(33, 105, 155, .24), transparent 35%),
+        linear-gradient(rgba(70, 140, 180, .035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(70, 140, 180, .035) 1px, transparent 1px),
+        var(--bg);
+      background-size: auto, 28px 28px, 28px 28px, auto;
+      font-family: Inter, "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+      overflow-x: auto;
+    }
+
+    button { font: inherit; }
+    .app { width: max(1180px, 100%); min-height: 100vh; }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      padding: 14px 20px 10px;
+      border-bottom: 1px solid rgba(100, 173, 220, .2);
+      background: rgba(4, 13, 24, .92);
+      box-shadow: 0 12px 35px rgba(0, 0, 0, .26);
+      backdrop-filter: blur(15px);
+    }
+
+    .brand-row, .control-row, .legend-row, .zone-title, .core-head,
+    .node-card, .step-chip, .status-item, .detail-head {
+      display: flex;
+      align-items: center;
+    }
+
+    .brand-row { justify-content: space-between; gap: 24px; }
+    .eyebrow { color: var(--cyan); font-size: 11px; letter-spacing: .18em; font-weight: 800; }
+    h1 { margin: 3px 0 0; font-size: clamp(20px, 1.7vw, 29px); letter-spacing: .02em; }
+    .brand-sub { margin-top: 4px; color: var(--muted); font-size: 12px; }
+    .live-badge {
+      display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+      border: 1px solid rgba(66, 230, 164, .35); border-radius: 999px;
+      color: #baffdf; background: rgba(66, 230, 164, .08); font: 700 11px ui-monospace, monospace;
+    }
+    .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 12px var(--green); animation: breathe 1.5s infinite; }
+
+    .control-row { flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .control-group { display: flex; align-items: center; gap: 6px; padding-right: 8px; margin-right: 2px; border-right: 1px solid var(--line); }
+    .control-group:last-child { border: 0; }
+    .btn, .protocol-pill, .data-pill, .speed-btn {
+      border: 1px solid rgba(125, 184, 221, .25); border-radius: 8px; color: #cfe9f9;
+      background: rgba(17, 40, 64, .85); padding: 7px 10px; cursor: pointer;
+      font-size: 11px; font-weight: 700; transition: .2s ease;
+    }
+    .btn:hover, .protocol-pill:hover, .data-pill:hover, .speed-btn:hover { border-color: var(--cyan); color: #fff; transform: translateY(-1px); }
+    .btn.primary { color: #03131d; background: var(--cyan); border-color: var(--cyan); }
+    .btn.defect { color: #fff; border-color: rgba(255, 89, 110, .55); background: rgba(255, 89, 110, .13); }
+    .btn.alarm { color: #fff; border-color: rgba(255, 159, 67, .55); background: rgba(255, 159, 67, .13); }
+    .btn.active, .speed-btn.active, .protocol-pill.active, .data-pill.active { color: #03131d; background: var(--cyan); border-color: var(--cyan); box-shadow: 0 0 18px rgba(53, 217, 255, .35); }
+
+    .legend-row { flex-wrap: wrap; gap: 7px; margin-top: 10px; }
+    .legend-label { color: #6f90a6; font-size: 10px; font-weight: 800; letter-spacing: .08em; }
+    .protocol-pill { position: relative; padding-left: 20px; }
+    .protocol-pill::before { content: ""; position: absolute; left: 8px; top: 50%; width: 6px; height: 6px; border-radius: 50%; transform: translateY(-50%); background: var(--pill-color, var(--cyan)); box-shadow: 0 0 8px var(--pill-color, var(--cyan)); }
+    .protocol-pill[data-protocol="HTTP / REST API"] { --pill-color: var(--purple); }
+    .protocol-pill[data-protocol="Modbus TCP"] { --pill-color: var(--green); }
+    .protocol-pill[data-protocol="Modbus RTU / RS-485"] { --pill-color: var(--yellow); }
+    .protocol-pill[data-protocol="Custom TCP"] { --pill-color: var(--orange); }
+    .protocol-pill[data-protocol="MQTT"] { --pill-color: var(--cyan); }
+    .protocol-pill[data-protocol="SQL"] { --pill-color: #78a9ff; }
+    .data-pill { color: #ffe5a8; border-color: rgba(255, 209, 102, .3); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+    .status-strip {
+      display: grid; grid-template-columns: 1.1fr .7fr 1fr 1fr 1fr 1fr 1.2fr 1.15fr 1.35fr;
+      gap: 1px; margin: 14px 20px 0; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--line); box-shadow: var(--shadow);
+    }
+    .status-item { min-width: 0; padding: 9px 11px; gap: 8px; background: rgba(8, 24, 40, .94); }
+    .status-item small { display: block; color: #66869d; font-size: 9px; text-transform: uppercase; letter-spacing: .08em; }
+    .status-item strong { display: block; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 700 11px ui-monospace, SFMono-Regular, Menlo, monospace; color: #dbf3ff; }
+    #status-result.ok { color: var(--green); }
+    #status-result.ng, #status-result.alarm { color: var(--red); }
+
+    .architecture {
+      position: relative;
+      display: grid;
+      grid-template-columns: 300px minmax(590px, 1fr) 340px;
+      grid-template-areas:
+        "business business business"
+        "vision upper iot"
+        "field field sql"
+        "timeline timeline timeline";
+      gap: 14px;
+      margin: 14px 20px 40px;
+      isolation: isolate;
+    }
+
+    #flow-svg { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 3; overflow: visible; pointer-events: none; }
+    .zone {
+      position: relative; z-index: 2; border: 1px solid rgba(104, 170, 211, .22); border-radius: 16px;
+      background: linear-gradient(145deg, rgba(10, 29, 48, .93), rgba(6, 19, 33, .94)); box-shadow: var(--shadow); overflow: hidden;
+    }
+    .zone::after { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: linear-gradient(90deg, transparent, var(--zone-color, var(--cyan)), transparent); opacity: .65; }
+    .zone-title { gap: 9px; padding: 12px 14px 10px; border-bottom: 1px solid rgba(117, 180, 217, .14); }
+    .zone-title .icon, .core-mark { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 8px; background: color-mix(in srgb, var(--zone-color, var(--cyan)) 14%, transparent); }
+    .zone-title h2 { margin: 0; font-size: 13px; }
+    .zone-title p { margin: 2px 0 0; color: var(--muted); font-size: 9px; }
+    .zone-tag { margin-left: auto; color: var(--zone-color, var(--cyan)); font: 800 9px ui-monospace, monospace; letter-spacing: .08em; }
+
+    .business-zone { grid-area: business; --zone-color: var(--purple); }
+    .vision-zone { grid-area: vision; --zone-color: var(--yellow); }
+    .upper-zone { grid-area: upper; --zone-color: var(--cyan); border-color: rgba(53, 217, 255, .42); box-shadow: 0 0 0 1px rgba(53, 217, 255, .08), 0 24px 70px rgba(0, 0, 0, .38); }
+    .iot-zone { grid-area: iot; --zone-color: var(--cyan); }
+    .field-zone { grid-area: field; --zone-color: var(--green); }
+    .sql-zone { grid-area: sql; --zone-color: #78a9ff; }
+    .timeline-zone { grid-area: timeline; --zone-color: var(--orange); }
+
+    .node-grid { display: grid; gap: 8px; padding: 10px; }
+    .business-grid { grid-template-columns: repeat(4, 1fr); }
+    .business-grid .node-card { min-height: 64px; }
+    .core-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .vision-node-list, .iot-grid { grid-template-columns: 1fr; }
+    .device-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .sql-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+    .node-card {
+      position: relative; gap: 9px; min-width: 0; min-height: 52px; padding: 9px 10px;
+      border: 1px solid rgba(120, 176, 210, .18); border-radius: 10px; background: rgba(11, 31, 50, .86);
+      cursor: pointer; transition: border-color .22s, background .22s, box-shadow .22s, transform .22s;
+    }
+    .node-card:hover, .core-head[data-node-id]:hover { border-color: rgba(53, 217, 255, .62); background: rgba(17, 46, 72, .96); transform: translateY(-1px); }
+    .node-card::before { content: ""; position: absolute; inset: -1px; border: 1px solid transparent; border-radius: inherit; pointer-events: none; }
+    .node-icon { flex: 0 0 auto; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; background: rgba(67, 134, 177, .13); font-size: 15px; }
+    .node-copy { min-width: 0; }
+    .node-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 800; }
+    .node-role { margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #7898ae; font-size: 9px; }
+    .node-state { position: absolute; top: 6px; right: 6px; width: 5px; height: 5px; border-radius: 50%; background: #3c5d73; }
+    .node-card.active, .core-head.active { border-color: var(--cyan) !important; background: rgba(23, 76, 99, .88) !important; box-shadow: 0 0 24px rgba(53, 217, 255, .4), inset 0 0 20px rgba(53, 217, 255, .08); transform: translateY(-2px) scale(1.012); }
+    .node-card.active .node-state { background: var(--cyan); box-shadow: 0 0 10px var(--cyan); }
+    .node-card.done { border-color: rgba(66, 230, 164, .38); }
+    .node-card.done .node-state { background: var(--green); }
+    .node-card.error { border-color: var(--red) !important; background: rgba(96, 21, 35, .82) !important; box-shadow: 0 0 24px rgba(255, 89, 110, .42); animation: errorPulse .75s infinite alternate; }
+    .node-card.ok { border-color: var(--green) !important; box-shadow: 0 0 22px rgba(66, 230, 164, .3); }
+
+    .node-card, .core-head { z-index: 4; }
+    .core-head { position: relative; gap: 10px; margin: 12px 12px 4px; padding: 10px 12px; border: 1px solid rgba(53, 217, 255, .24); border-radius: 11px; background: linear-gradient(90deg, rgba(53, 217, 255, .13), rgba(76, 141, 255, .06)); cursor: pointer; transition: .2s; }
+    .core-head h2 { margin: 0; font-size: 14px; }
+    .core-head p { margin: 3px 0 0; color: var(--muted); font-size: 9px; }
+    .core-badge { margin-left: auto; padding: 5px 7px; border: 1px solid rgba(53, 217, 255, .32); border-radius: 6px; color: var(--cyan); font: 800 9px ui-monospace, monospace; }
+    .upper-bottom { display: grid; grid-template-columns: 1.05fr .95fr; gap: 8px; padding: 0 10px 10px; }
+    .context-card, .aggregation-card, .vision-screen, .trace-card, .topic-monitor, .mini-report {
+      border: 1px solid rgba(113, 176, 214, .18); border-radius: 10px; background: rgba(4, 17, 29, .72); overflow: hidden;
+    }
+    .mini-head { display: flex; align-items: center; justify-content: space-between; padding: 7px 9px; border-bottom: 1px solid rgba(113, 176, 214, .12); color: #9dc1d8; font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
+    .context-body, .aggregation-body, .trace-body { padding: 8px 9px; }
+    .kv { display: flex; justify-content: space-between; gap: 10px; margin: 4px 0; color: #7998ac; font: 9px ui-monospace, monospace; }
+    .kv b { color: #dff6ff; font-weight: 700; }
+    .decision { margin-top: 6px; padding: 6px; border-radius: 6px; text-align: center; color: #8ca9bb; background: rgba(87, 125, 150, .08); font: 900 10px ui-monospace, monospace; }
+    .decision.ok { color: #032118; background: var(--green); }
+    .decision.ng, .decision.alarm { color: #fff; background: var(--red); }
+
+    .vision-screen { position: relative; height: 152px; margin: 10px; background: #030a10; }
+    .vision-screen::after { content: "CAM-01 · LIVE"; position: absolute; top: 7px; left: 8px; color: #7b9aac; font: 8px ui-monospace, monospace; }
+    .camera-flash { position: absolute; inset: 0; z-index: 8; background: #fff; opacity: 0; pointer-events: none; }
+    .conveyor { position: absolute; left: 0; right: 0; bottom: 24px; height: 22px; border-top: 2px solid #385363; border-bottom: 2px solid #385363; background: repeating-linear-gradient(90deg, #172d3a 0 16px, #0c1d27 16px 28px); }
+    .part { position: absolute; left: 28px; bottom: 46px; width: 76px; height: 42px; border-radius: 5px; background: linear-gradient(145deg, #7f929c, #314b5b); border: 1px solid #bdd1d9; box-shadow: 0 8px 13px rgba(0,0,0,.4); }
+    .part::before, .part::after { content: ""; position: absolute; top: 12px; width: 14px; height: 14px; border-radius: 50%; background: #07121b; border: 1px solid #a4becb; }
+    .part::before { left: 11px; } .part::after { right: 11px; }
+    .camera-arm { position: absolute; top: 12px; right: 40px; width: 9px; height: 58px; border-radius: 4px; background: #547183; }
+    .camera-head { position: absolute; top: 45px; right: 24px; width: 42px; height: 23px; border-radius: 4px; background: #203b4a; border: 1px solid #7596a8; }
+    .camera-head::after { content: ""; position: absolute; left: 5px; bottom: -10px; width: 30px; height: 11px; clip-path: polygon(30% 0,70% 0,100% 100%,0 100%); background: rgba(255, 209, 102, .13); }
+    .roi { position: absolute; left: 20px; bottom: 38px; width: 92px; height: 59px; border: 2px dashed var(--green); opacity: 0; }
+    .roi::before { content: "ROI 01"; position: absolute; top: -14px; left: -2px; color: var(--green); font: 8px ui-monospace, monospace; }
+    .contour { position: absolute; left: 45px; bottom: 58px; width: 24px; height: 22px; border: 2px solid var(--cyan); border-radius: 50%; opacity: 0; }
+    .defect-mark { position: absolute; left: 83px; bottom: 62px; width: 18px; height: 18px; border: 2px solid var(--red); border-radius: 50%; opacity: 0; box-shadow: 0 0 12px var(--red); }
+    .defect-mark::after { content: "裂纹"; position: absolute; top: 17px; left: -2px; color: var(--red); font: 8px ui-monospace, monospace; }
+    .measure { position: absolute; left: 21px; bottom: 31px; width: 90px; height: 1px; border-top: 1px solid var(--yellow); opacity: 0; }
+    .measure::after { content: "82.36 mm"; position: absolute; top: 2px; left: 26px; color: var(--yellow); font: 8px ui-monospace, monospace; }
+    .vision-result { position: absolute; top: 8px; right: 8px; padding: 4px 6px; border: 1px solid #426174; border-radius: 5px; color: #7895a6; font: 900 9px ui-monospace, monospace; }
+    .vision-screen.capturing .camera-flash { animation: flash .55s ease-out; }
+    .vision-screen.processing .roi, .vision-screen.processing .contour, .vision-screen.processing .measure { opacity: 1; animation: scanPulse 1s infinite alternate; }
+    .vision-screen.result-ng .defect-mark { opacity: 1; }
+    .vision-screen.result-ng .vision-result { color: #fff; background: var(--red); border-color: var(--red); }
+    .vision-screen.result-ok .vision-result { color: #031a12; background: var(--green); border-color: var(--green); }
+    .vision-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 0 10px 8px; }
+    .vision-meta div { padding: 5px 6px; border-radius: 6px; color: #7896a9; background: rgba(0,0,0,.18); font: 8px ui-monospace, monospace; }
+    .vision-meta b { display: block; margin-top: 2px; color: #d9f0fc; }
+
+    .iot-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .iot-grid .node-card:first-child { grid-column: 1 / -1; }
+    .topic-monitor { margin: 0 10px 10px; }
+    .topic-list { padding: 7px; }
+    .topic { display: flex; gap: 6px; align-items: center; margin: 4px 0; padding: 5px 6px; border-radius: 5px; color: #69899e; background: rgba(53, 217, 255, .04); font: 8px ui-monospace, monospace; }
+    .topic::before { content: "PUB"; color: var(--cyan); font-size: 7px; }
+    .topic.active { color: #dff9ff; background: rgba(53, 217, 255, .14); box-shadow: inset 2px 0 var(--cyan); }
+
+    .protocol-tag { position: absolute; right: 8px; bottom: 5px; color: var(--node-protocol-color, #7794a7); font: 700 7px ui-monospace, monospace; }
+    .trace-card { margin: 0 10px 10px; }
+    .trace-card.writing { animation: sqlWrite .6s ease-in-out 3; }
+    .trace-result { color: var(--muted); }
+    .trace-result.ok { color: var(--green); } .trace-result.ng, .trace-result.alarm { color: var(--red); }
+    .db-stack { display: inline-flex; align-items: center; gap: 4px; }
+    .db-led { width: 6px; height: 6px; border-radius: 50%; background: #3b596f; }
+    .writing .db-led { background: var(--green); box-shadow: 0 0 9px var(--green); }
+
+    .timeline-wrap { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 6px; padding: 11px; }
+    .step-chip { position: relative; flex-direction: column; justify-content: center; gap: 4px; min-height: 50px; padding: 5px; border: 1px solid rgba(124, 179, 213, .17); border-radius: 7px; color: #67869b; background: rgba(7, 22, 36, .76); cursor: pointer; text-align: center; transition: .2s; }
+    .step-chip::after { content: ""; position: absolute; top: 50%; right: -7px; width: 7px; height: 1px; background: rgba(129, 176, 205, .22); }
+    .step-chip:last-child::after { display: none; }
+    .step-no { font: 800 8px ui-monospace, monospace; }
+    .step-name { font-size: 9px; font-weight: 700; line-height: 1.2; }
+    .step-chip.active { color: #03131d; border-color: var(--cyan); background: var(--cyan); box-shadow: 0 0 18px rgba(53, 217, 255, .35); transform: translateY(-2px); }
+    .step-chip.done { color: #9be8c6; border-color: rgba(66, 230, 164, .42); background: rgba(66, 230, 164, .09); }
+    .step-chip.error { color: #fff; border-color: var(--red); background: rgba(255, 89, 110, .28); }
+
+    .edge-path { fill: none; stroke: rgba(85, 137, 171, .24); stroke-width: 1.5; stroke-dasharray: 5 6; marker-end: url(#arrow-default); transition: stroke .25s, opacity .25s, filter .25s, stroke-width .25s; }
+    .edge-label { fill: #89aabe; font: 700 8px ui-monospace, monospace; opacity: 0; paint-order: stroke; stroke: #07131f; stroke-width: 4px; stroke-linejoin: round; transition: opacity .2s; }
+    .edge-group.active .edge-path, .edge-group.protocol-focus .edge-path { stroke: var(--edge-color, var(--cyan)); stroke-width: 3; opacity: 1; filter: drop-shadow(0 0 5px var(--edge-color, var(--cyan))); animation: dashMove .55s linear infinite; }
+    .edge-group.active .edge-label, .edge-group.protocol-focus .edge-label { opacity: 1; fill: var(--edge-color, var(--cyan)); }
+    .edge-group.done .edge-path { stroke: rgba(66, 230, 164, .42); }
+    .edge-group.error .edge-path { stroke: var(--red); stroke-width: 3; filter: drop-shadow(0 0 6px var(--red)); }
+    .edge-group.protocol-dim { opacity: .08; }
+    .data-token circle { filter: drop-shadow(0 0 5px currentColor); }
+    .data-token text { fill: #fff; font: 800 9px ui-monospace, monospace; paint-order: stroke; stroke: #06101d; stroke-width: 4px; }
+
+    .detail-drawer {
+      position: fixed; top: 0; right: 0; z-index: 100; width: min(440px, 94vw); height: 100vh;
+      border-left: 1px solid rgba(53, 217, 255, .35); background: rgba(5, 17, 29, .98); box-shadow: -25px 0 70px rgba(0,0,0,.5);
+      transform: translateX(105%); transition: transform .32s ease; overflow-y: auto; backdrop-filter: blur(18px);
+    }
+    .detail-drawer.open { transform: translateX(0); }
+    .detail-head { position: sticky; top: 0; z-index: 3; justify-content: space-between; padding: 17px 18px; border-bottom: 1px solid var(--line); background: rgba(5, 17, 29, .96); }
+    .detail-head small { color: var(--cyan); font-size: 9px; letter-spacing: .12em; }
+    .detail-head h3 { margin: 4px 0 0; font-size: 18px; }
+    .close-btn { width: 31px; height: 31px; border: 1px solid var(--line); border-radius: 8px; color: #b6cfde; background: #10273b; cursor: pointer; }
+    .detail-body { padding: 15px 18px 30px; }
+    .detail-section { padding: 12px 0; border-bottom: 1px solid rgba(115, 175, 212, .13); }
+    .detail-section:last-child { border: 0; }
+    .detail-section h4 { margin: 0 0 7px; color: #7199b2; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+    .detail-section p { margin: 0; color: #d0e6f3; font-size: 12px; line-height: 1.72; }
+    .tag-list { display: flex; flex-wrap: wrap; gap: 6px; }
+    .detail-tag, .life-node { padding: 6px 8px; border: 1px solid rgba(91, 158, 200, .22); border-radius: 6px; color: #b9d4e5; background: rgba(32, 72, 98, .18); font-size: 10px; }
+    .english-box { padding: 11px; border-left: 3px solid var(--cyan); border-radius: 0 7px 7px 0; color: #dfffff; background: rgba(53, 217, 255, .08); font: 11px/1.65 ui-monospace, monospace; }
+    .life-path { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; padding: 9px 0; }
+    .life-arrow { color: var(--cyan); }
+
+    .toast { position: fixed; left: 50%; bottom: 26px; z-index: 120; min-width: 280px; max-width: 560px; padding: 11px 15px; border: 1px solid rgba(53,217,255,.38); border-radius: 9px; color: #dff8ff; background: rgba(6, 25, 40, .96); box-shadow: 0 15px 45px rgba(0,0,0,.4); transform: translate(-50%, 25px); opacity: 0; pointer-events: none; font-size: 11px; text-align: center; }
+    .toast.show { animation: toastIn 2.8s ease both; }
+
+    @keyframes breathe { 50% { opacity: .35; transform: scale(.72); } }
+    @keyframes errorPulse { to { box-shadow: 0 0 32px rgba(255, 89, 110, .7); } }
+    @keyframes flash { 0% { opacity: 0; } 15% { opacity: .95; } 100% { opacity: 0; } }
+    @keyframes scanPulse { to { filter: drop-shadow(0 0 7px currentColor); } }
+    @keyframes sqlWrite { 50% { border-color: var(--green); box-shadow: 0 0 18px rgba(66,230,164,.25); } }
+    @keyframes dashMove { to { stroke-dashoffset: -11; } }
+    @keyframes toastIn { 0%,100% { opacity: 0; transform: translate(-50%, 25px); } 12%,82% { opacity: 1; transform: translate(-50%, 0); } }
+
+    @media (max-width: 1450px) {
+      .architecture { grid-template-columns: 270px minmax(540px, 1fr) 310px; }
+      .status-strip { grid-template-columns: repeat(5, 1fr); }
+      .status-item:nth-child(n+6) { border-top: 1px solid var(--line); }
+      .timeline-wrap { grid-template-columns: repeat(6, 1fr); }
+      .step-chip:nth-child(6)::after { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <header class="topbar">
+      <div class="brand-row">
+        <div>
+          <div class="eyebrow">FACTORY CONTROL · DIGITAL THREAD</div>
+          <h1>工业工厂上位机全链路业务运行模拟器</h1>
+          <div class="brand-sub">以上位机为核心：业务工单 → 现场设备 → 视觉质检 → 控制决策 → SQL 追溯 → MQTT 协同</div>
+        </div>
+        <div class="live-badge"><span class="live-dot"></span>SIMULATION ONLINE</div>
+      </div>
+
+      <div class="control-row" aria-label="动画控制台">
+        <div class="control-group">
+          <button class="btn primary scenario-btn" data-scenario="normalCycle">▶ Play Normal</button>
+          <button class="btn defect scenario-btn" data-scenario="defectCycle">◆ Play Defect</button>
+          <button class="btn alarm scenario-btn" data-scenario="alarmCycle">⚠ Play Alarm</button>
+        </div>
+        <div class="control-group">
+          <button class="btn" id="pause-btn">Ⅱ Pause</button>
+          <button class="btn" id="restart-btn">↻ Restart</button>
+          <button class="btn" id="next-btn">→ Step Next</button>
+        </div>
+        <div class="control-group" aria-label="速度控制">
+          <span class="legend-label">SPEED</span>
+          <button class="speed-btn" data-speed="0.65">Slow</button>
+          <button class="speed-btn active" data-speed="1">Normal</button>
+          <button class="speed-btn" data-speed="1.7">Fast</button>
+        </div>
+      </div>
+
+      <div class="legend-row">
+        <span class="legend-label">PROTOCOL</span>
+        <button class="protocol-pill" data-protocol="HTTP / REST API">HTTP / REST</button>
+        <button class="protocol-pill" data-protocol="Modbus TCP">Modbus TCP</button>
+        <button class="protocol-pill" data-protocol="Modbus RTU / RS-485">Modbus RTU / RS-485</button>
+        <button class="protocol-pill" data-protocol="Custom TCP">Custom TCP</button>
+        <button class="protocol-pill" data-protocol="MQTT">MQTT</button>
+        <button class="protocol-pill" data-protocol="SQL">SQL</button>
+        <span class="legend-label" style="margin-left:8px">DATA LIFECYCLE</span>
+        <button class="data-pill" data-object="orderId">orderId</button>
+        <button class="data-pill" data-object="workpieceId">workpieceId</button>
+        <button class="data-pill" data-object="frameId">frameId</button>
+        <button class="data-pill" data-object="tagId">tagId</button>
+        <button class="data-pill" data-object="alarmId">alarmId</button>
+      </div>
+    </header>
+
+    <section class="status-strip" aria-label="实时状态面板">
+      <div class="status-item"><div><small>当前模式</small><strong id="status-mode">待机 / READY</strong></div></div>
+      <div class="status-item"><div><small>当前步骤</small><strong id="status-step">0 / 12</strong></div></div>
+      <div class="status-item"><div><small>orderId</small><strong id="status-order">—</strong></div></div>
+      <div class="status-item"><div><small>workpieceId</small><strong id="status-workpiece">—</strong></div></div>
+      <div class="status-item"><div><small>frameId</small><strong id="status-frame">—</strong></div></div>
+      <div class="status-item"><div><small>当前协议</small><strong id="status-protocol">—</strong></div></div>
+      <div class="status-item"><div><small>当前状态</small><strong id="status-state">等待场景启动</strong></div></div>
+      <div class="status-item"><div><small>当前结果</small><strong id="status-result">PENDING</strong></div></div>
+      <div class="status-item"><div><small>高亮系统</small><strong id="status-system">—</strong></div></div>
+    </section>
+
+    <section class="architecture" id="architecture">
+      <svg id="flow-svg" aria-hidden="true">
+        <defs>
+          <marker id="arrow-default" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#477590" /></marker>
+        </defs>
+        <g id="edge-layer"></g>
+        <g id="token-layer"></g>
+      </svg>
+
+      <section class="zone business-zone">
+        <div class="zone-title"><span class="icon">🏢</span><div><h2>业务系统层</h2><p>工单、物料、库存、质量规则与报工回传</p></div><span class="zone-tag">L4 · ENTERPRISE</span></div>
+        <div class="node-grid business-grid" id="business-nodes"></div>
+      </section>
+
+      <section class="zone vision-zone">
+        <div class="zone-title"><span class="icon">◉</span><div><h2>视觉检测与质量识别</h2><p>采图、ROI、轮廓、尺寸与缺陷判断</p></div><span class="zone-tag">VISION</span></div>
+        <div class="vision-screen" id="vision-screen">
+          <div class="camera-flash"></div><div class="camera-arm"></div><div class="camera-head"></div>
+          <div class="conveyor"></div><div class="part" id="visual-part"></div><div class="roi"></div><div class="contour"></div><div class="defect-mark"></div><div class="measure"></div>
+          <div class="vision-result" id="vision-result">WAIT</div>
+        </div>
+        <div class="vision-meta"><div>workpieceId<b id="vision-workpiece">—</b></div><div>frameId<b id="vision-frame">—</b></div><div>confidence<b id="vision-confidence">—</b></div><div>sizeMeasurement<b id="vision-size">—</b></div></div>
+        <div class="node-grid vision-node-list" id="vision-nodes"></div>
+      </section>
+
+      <section class="zone upper-zone">
+        <div class="core-head" id="node-upper-core" data-node-id="upper-core" tabindex="0">
+          <span class="core-mark">⬡</span><div><h2>上位机核心：WPF + 工业通信 + 业务处理</h2><p>将设备世界的数据，转成可监控、可控制、可追溯的业务闭环</p></div><span class="core-badge">CORE HUB</span>
+        </div>
+        <div class="node-grid core-grid" id="upper-nodes"></div>
+        <div class="upper-bottom">
+          <div class="context-card" id="context-card"><div class="mini-head"><span>Production Task Context</span><span>业务上下文</span></div><div class="context-body"><div class="kv"><span>orderId</span><b id="ctx-order">—</b></div><div class="kv"><span>recipeId</span><b id="ctx-recipe">—</b></div><div class="kv"><span>batchId</span><b id="ctx-batch">—</b></div><div class="kv"><span>materialCode</span><b id="ctx-material">—</b></div></div></div>
+          <div class="aggregation-card" id="aggregation-card"><div class="mini-head"><span>Result Aggregation</span><span>结果聚合</span></div><div class="aggregation-body"><div class="kv"><span>Device Status</span><b id="agg-device">WAIT</b></div><div class="kv"><span>Process Tags</span><b id="agg-tags">0</b></div><div class="kv"><span>Vision Result</span><b id="agg-vision">WAIT</b></div><div class="kv"><span>Alarm State</span><b id="agg-alarm">NONE</b></div><div class="decision" id="agg-decision">PENDING</div></div></div>
+        </div>
+      </section>
+
+      <section class="zone iot-zone">
+        <div class="zone-title"><span class="icon">☁</span><div><h2>MQTT / IoT 协同层</h2><p>实时发布、订阅分发与跨系统协同</p></div><span class="zone-tag">PUB / SUB</span></div>
+        <div class="node-grid iot-grid" id="iot-nodes"></div>
+        <div class="topic-monitor"><div class="mini-head"><span>MQTT Topic Monitor</span><span id="mqtt-count">0 msg</span></div><div class="topic-list"><div class="topic">factory/line1/status</div><div class="topic">factory/line1/alarm</div><div class="topic">factory/line1/device/online</div><div class="topic">factory/line1/quality/result</div></div></div>
+      </section>
+
+      <section class="zone field-zone">
+        <div class="zone-title"><span class="icon">⚙</span><div><h2>下游现场设备层</h2><p>上位机轮询实时值、下发控制指令、处理设备离线与超时</p></div><span class="zone-tag">L0 / L1 · OT</span></div>
+        <div class="node-grid device-grid" id="field-nodes"></div>
+      </section>
+
+      <section class="zone sql-zone">
+        <div class="zone-title"><span class="icon">▰</span><div><h2>SQL Server 持久化与追溯</h2><p>生产、工艺、报警、缺陷与设备日志</p></div><span class="zone-tag">HISTORY</span></div>
+        <div class="node-grid sql-grid" id="sql-nodes"></div>
+        <div class="trace-card" id="trace-card"><div class="mini-head"><span class="db-stack"><span class="db-led"></span>Trace Record</span><span>SQL INSERT</span></div><div class="trace-body"><div class="kv"><span>orderId</span><b id="trace-order">—</b></div><div class="kv"><span>workpieceId</span><b id="trace-workpiece">—</b></div><div class="kv"><span>frameId</span><b id="trace-frame">—</b></div><div class="kv"><span>result</span><b class="trace-result" id="trace-result">—</b></div><div class="kv"><span>timestamp</span><b id="trace-time">—</b></div><div class="kv"><span>defectType</span><b id="trace-defect">—</b></div></div></div>
+      </section>
+
+      <section class="zone timeline-zone">
+        <div class="zone-title"><span class="icon">⌁</span><div><h2>全链路时间轴</h2><p>点击步骤可预览说明；使用 Step Next 可逐步演示</p></div><span class="zone-tag">12 STEPS</span></div>
+        <div class="timeline-wrap" id="timeline-wrap"></div>
+      </section>
+    </section>
+  </main>
+
+  <aside class="detail-drawer" id="detail-drawer" aria-label="技术细节面板">
+    <div class="detail-head"><div><small>TECHNICAL DETAIL</small><h3 id="detail-title">节点技术细节</h3></div><button class="close-btn" id="detail-close" aria-label="关闭">✕</button></div>
+    <div class="detail-body" id="detail-body"></div>
+  </aside>
+  <div class="toast" id="toast"></div>
+
+  <script>
+    // ================================================================
+    // 1) 节点模型：每个可点击节点都包含业务、数据、技术、异常和面试表达。
+    // ================================================================
+    const N = (id, title, layer, icon, role, inputs, outputs, technologies, abnormalCases, relationToUpperComputer, interviewEnglish, protocol = "") => ({
+      id, title, layer, icon, role, inputs, outputs, technologies, abnormalCases, relationToUpperComputer, interviewEnglish, protocol
+    });
+
+    const nodes = [
+      N("mes", "MES 制造执行系统", "business", "M", "下发生产工单、跟踪生产执行、接收报工与工单完成状态。", ["生产计划", "产品工艺", "工单优先级"], ["orderId", "工单任务", "计划数量"], ["HTTP / REST API", "JSON", "工单状态机"], ["接口超时", "重复工单", "工单状态冲突"], "MES 告诉上位机生产什么；上位机把真实执行结果回传 MES。", "MES sends production orders to the upper computer and receives execution reports.", "HTTP / REST API"),
+      N("erp", "ERP 企业资源计划", "business", "E", "提供物料主数据、生产资源与成本相关信息，并接收生产消耗。", ["物料主数据", "BOM", "计划信息"], ["materialCode", "批次规则", "工艺基础参数"], ["REST API", "主数据映射", "幂等处理"], ["物料编码不一致", "版本过期", "接口不可用"], "上位机使用 ERP 主数据补全生产任务上下文。", "ERP provides material and resource data for the production task.", "HTTP / REST API"),
+      N("wms", "WMS 仓储管理系统", "W", "提供原料库存、库位、批次与领料状态。", ["库存台账", "库位", "批次"], ["batchId", "库存可用量", "物料到位状态"], ["REST API", "条码 / RFID", "批次追踪"], ["库存不足", "批次锁定", "物料未到位"], "上位机在开工前确认物料和批次，避免错料生产。", "WMS confirms material stock and batch information before production starts.", "HTTP / REST API"),
+      N("qms", "QMS 质量管理系统", "Q", "提供质量规则，并接收视觉和过程质量结果。", ["检验规范", "公差", "缺陷字典"], ["qualityRule", "上下限", "抽检策略"], ["REST API", "质量规则版本", "SPC"], ["规则版本不一致", "质检结果漏传", "公差配置错误"], "上位机按 QMS 规则判定，并回传每个工件的质量结果。", "QMS provides quality rules and receives inspection results.", "HTTP / REST API"),
+
+      N("upper-core", "上位机核心", "core", "⬡", "连接企业系统、现场设备、视觉、数据库和 IoT 平台，执行实时监控与业务闭环。", ["工单", "设备 Tag", "视觉结果", "质量规则"], ["控制指令", "报警", "生产记录", "实时状态"], ["WPF", ".NET", "多线程", "状态机", "工业协议"], ["线程阻塞", "通信中断", "业务状态不一致", "异常未隔离"], "它是 OT 现场与 IT 业务之间的实时协调中心。", "The upper computer connects devices, business systems, vision, storage, and real-time monitoring."),
+      N("wpf-ui", "WPF UI 可视化界面", "upper", "▣", "提供监控、操作、报警确认、趋势、报表和追溯入口。", ["实时 Tag", "报警列表", "历史查询结果"], ["操作命令", "查询条件", "用户确认"], ["WPF", "MVVM", "Data Binding", "Dispatcher"], ["UI 卡顿", "跨线程更新", "权限误操作"], "UI 不是孤立界面，而是上位机业务与运维人员的交互入口。", "WPF UI is the operator entry for monitoring, control, alarms, trends, and traceability."),
+      N("device-comm", "设备通信管理", "upper", "⇄", "管理设备连接、轮询周期、重连、心跳和通信质量。", ["设备配置", "IP / 串口参数", "轮询任务"], ["原始报文", "连接状态", "通信质量"], ["Socket", "SerialPort", "连接池", "重试与超时"], ["timeout", "offline", "粘包 / 拆包", "串口占用"], "它负责稳定取得现场数据，并把连接异常交给报警和日志模块。", "Device communication manages connections, polling, timeout, and reconnection."),
+      N("data-acquisition", "数据采集", "upper", "↥", "按周期或事件采集 PLC、传感器、仪表与能耗数据。", ["原始寄存器", "状态位", "设备报文"], ["tagId", "实时值", "采集时间"], ["轮询调度", "批量读取", "事件采集", "缓存"], ["采样丢失", "数据延迟", "轮询拥塞"], "它把设备通信结果转成连续的实时数据流。", "Data acquisition collects real-time values from PLCs, sensors, meters, and drives."),
+      N("tag-mapping", "Tag 映射 / 数据清洗", "upper", "⌗", "把不同协议、不同设备返回的原始数据转换成统一的业务变量，例如温度、压力、转速、能耗和到位信号。", ["Modbus 寄存器值", "串口返回值", "自定义 TCP 数据包", "PLC 状态位"], ["tagName", "value", "timestamp", "quality", "deviceId"], ["寄存器解析", "数据类型转换", "单位换算", "异常值过滤", "时间戳对齐", "数据质量标记"], ["通信超时", "寄存器地址错误", "数据越限", "设备离线", "数据抖动"], "它是设备数据进入业务逻辑前的标准化入口。没有 Tag 映射，上位机很难把设备数据用于报警、UI 展示、SQL 存储和 MQTT 发布。", "This step converts raw device values into clean business tags for UI, alarms, storage, and reporting."),
+      N("alarm-engine", "报警判断", "upper", "!", "对越限、状态异常、通信质量和业务超时进行规则判断。", ["清洗后的 Tag", "设备在线状态", "报警规则"], ["alarmId", "报警等级", "开始 / 恢复时间"], ["阈值判断", "防抖", "延迟触发", "报警状态机"], ["误报警", "报警风暴", "恢复状态遗漏"], "它把数据异常变成可确认、可存储、可推送的业务事件。", "The alarm engine converts abnormal values and communication faults into traceable alarm events."),
+      N("process-monitor", "工艺流程监控", "upper", "◎", "跟踪工序状态、工件位置、设备互锁和工艺窗口。", ["工艺 Tag", "PLC 状态", "视觉结果"], ["工序状态", "节拍", "质量决策"], ["状态机", "互锁条件", "节拍分析", "流程编排"], ["工序跳步", "状态卡死", "互锁不满足"], "它让上位机知道工件现在在哪一步以及下一步能否执行。", "Process monitoring tracks each workpiece, interlock, and process state."),
+      N("task-scheduler", "任务调度 / 业务逻辑", "upper", "▶", "接收工单并构建任务上下文，协调设备、视觉、存储和业务回传。", ["orderId", "recipeId", "batchId", "业务规则"], ["设备任务", "采图任务", "控制决策"], ["任务队列", "状态机", "并发控制", "幂等"], ["任务重复", "状态竞争", "上下文丢失"], "它是工单进入上位机后的业务指挥中心。", "The scheduler turns an order into coordinated device, vision, and reporting tasks."),
+      N("protocol-adapter", "协议适配层", "upper", "⎋", "屏蔽 Modbus、串口、自定义 TCP 等协议差异，提供统一读写接口。", ["设备地址", "功能码", "报文配置"], ["统一 Read / Write 结果", "标准错误码"], ["Modbus TCP", "Modbus RTU", "RS-485", "Custom TCP", "Serial"], ["CRC 错误", "字节序错误", "功能码异常", "协议版本不兼容"], "它让上层业务逻辑不需要关心每台设备的报文细节。", "The protocol adapter hides protocol differences behind one consistent read and write interface."),
+      N("logging", "日志与异常处理", "upper", "≡", "记录通信、操作、业务和异常日志，并提供降级与恢复线索。", ["异常对象", "通信事件", "用户操作"], ["结构化日志", "错误码", "诊断上下文"], ["Serilog / NLog", "全局异常捕获", "日志分级", "Correlation ID"], ["日志爆盘", "异常吞掉", "上下文缺失"], "它保证故障可定位，并把重要事件送入 SQL 和运维通道。", "Logging captures device, business, and operator events for diagnosis and recovery."),
+
+      N("vision-camera", "工业相机采图", "vision", "◉", "在工件到位后按触发信号曝光采图，并生成 frameId。", ["partArrived", "曝光参数", "触发命令"], ["frameId", "原始图像", "采图时间"], ["GigE Vision", "硬触发", "曝光 / 增益", "图像缓冲"], ["丢帧", "曝光过度", "触发延迟", "相机离线"], "上位机发起或协调采图，并把 frameId 绑定当前 workpieceId。", "The industrial camera captures an image and creates a frame ID for the current workpiece."),
+      N("opencv", "OpenCV 缺陷识别", "vision", "CV", "执行 ROI、滤波、轮廓、孔位、尺寸与缺陷识别。", ["原始图像", "ROI 配置", "质量规则"], ["OK / NG", "defectType", "位置", "置信度", "尺寸"], ["OpenCV", "阈值分割", "轮廓检测", "形态学", "标定"], ["光照变化", "误检 / 漏检", "标定漂移", "处理超时"], "检测结果回到上位机，与 PLC 状态和工艺数据共同形成最终决策。", "OpenCV finds contours, measures features, and returns an OK or NG result."),
+      N("vision-result", "外观 / 工艺缺陷检测", "vision", "✓", "把算法输出整理为可追溯的结构化质量结果。", ["算法特征", "尺寸测量", "缺陷区域"], ["detectionResult", "缺陷截图索引", "最终判定"], ["结果模型", "坐标转换", "规则判定"], ["规则冲突", "结果绑定错件", "图片与记录不一致"], "它是视觉算法进入生产业务闭环的接口。", "The inspection result binds vision evidence to the correct workpiece and quality decision."),
+
+      N("plc", "PLC", "field", "PLC", "既提供设备状态和生产信号，也是上位机下发放行、剔除和配方指令的控制对象。", ["放行 / 剔除指令", "配方参数", "启动停止"], ["状态位", "计数", "partArrived", "互锁"], ["Modbus TCP", "寄存器", "线圈", "握手位"], ["通信超时", "程序停机", "握手失败"], "PLC 是现场控制核心；上位机负责业务协调和高级监控，不取代 PLC 的确定性控制。", "PLC is both a real-time data source and a control target for release or reject commands.", "Modbus TCP"),
+      N("energy-meter", "电表 / 能耗表", "field", "kWh", "采集电压、电流、功率与累计能耗。", ["轮询请求"], ["energyKwh", "功率", "电流"], ["Modbus TCP", "倍率换算", "累计量"], ["倍率错误", "断线", "累计值回零"], "上位机采集后用于班次能耗、SQL 历史和能源平台。", "The energy meter provides electrical and energy consumption data.", "Modbus TCP"),
+      N("sensor", "传感器", "field", "S", "采集温度、压力、到位、振动等过程信号。", ["物理量", "轮询 / IO 状态"], ["temperature", "pressure", "partArrived"], ["Modbus TCP", "模拟量", "数字量"], ["越限", "断线", "漂移", "抖动"], "传感器值进入采集、清洗、报警和流程监控。", "Sensors provide process values and arrival signals for monitoring and control.", "Modbus TCP"),
+      N("instrument", "仪表", "field", "I", "提供压力、流量、温控等仪表读数和设定值。", ["查询命令", "设定值"], ["PV", "SV", "状态码"], ["Modbus RTU", "RS-485", "CRC"], ["CRC 错误", "地址冲突", "读数异常"], "上位机通过协议适配统一解析仪表数据。", "Instruments return process values over Modbus RTU or RS-485.", "Modbus RTU / RS-485"),
+      N("vfd", "变频器", "field", "Hz", "提供频率、转速、运行与故障状态，并接收频率设定。", ["频率设定", "启停命令"], ["motorSpeed", "运行状态", "故障码"], ["Modbus RTU", "RS-485", "控制字"], ["过流", "过温", "总线超时"], "上位机监控状态和参数，PLC 通常负责关键实时联锁。", "The drive reports motor speed and faults and receives operating setpoints.", "Modbus RTU / RS-485"),
+      N("field-camera", "相机 / 工业相机", "field", "CAM", "作为现场设备接受采图触发、参数设置并返回状态。", ["Trigger", "曝光", "增益"], ["frameId", "相机状态", "图像"], ["GigE", "Serial", "Vendor SDK"], ["掉线", "丢帧", "SDK 异常"], "上位机把设备控制与视觉算法结果绑定到同一工件。", "The camera is controlled as a field device and returns images for inspection.", "Custom TCP"),
+      N("special-device", "特殊设备 / 厂商设备", "field", "OEM", "通过厂商私有报文执行专用工艺或返回专用数据。", ["自定义命令", "参数包"], ["设备状态", "工艺结果", "错误码"], ["Custom TCP", "粘包拆包", "校验码"], ["协议版本变化", "报文错位", "厂商错误码"], "协议适配层把私有协议转换为统一业务事件。", "Vendor equipment uses a custom TCP protocol that the adapter normalizes.", "Custom TCP"),
+      N("serial-device", "串口设备", "field", "COM", "通过串口发送命令并返回测量或状态数据。", ["串口命令", "地址"], ["测量值", "状态码"], ["Serial", "RS-232", "RS-485", "帧校验"], ["端口占用", "波特率错误", "乱码"], "上位机管理端口生命周期并解析为标准 Tag。", "Serial devices return measurements that are converted into standard tags.", "Modbus RTU / RS-485"),
+
+      N("mqtt-broker", "MQTT Broker", "iot", "MQ", "接收上位机发布的状态、报警、质量和在线消息，再按 Topic 分发。", ["Topic", "Payload", "QoS"], ["订阅消息", "保留消息", "离线队列"], ["MQTT", "QoS", "Retain", "TLS"], ["连接断开", "消息积压", "Topic 设计混乱"], "Broker 解耦上位机与多个实时消费系统。", "MQTT Broker distributes real-time messages to many subscribers without tight coupling.", "MQTT"),
+      N("scada", "SCADA / 看板系统", "iot", "▤", "订阅产线状态和实时数据，展示集中监控看板。", ["状态 Topic", "实时 Tag"], ["看板", "趋势", "统计"], ["MQTT Subscribe", "WebSocket", "Dashboard"], ["数据延迟", "订阅中断"], "它消费上位机发布的数据，不直接承担设备业务控制。", "SCADA subscribes to real-time production and device status topics.", "MQTT"),
+      N("edge-gateway", "边缘网关", "iot", "GW", "汇聚现场或转发数据，承担边缘缓存和协议转换。", ["设备流", "MQTT 消息"], ["聚合数据", "边缘规则"], ["Edge Computing", "Store and Forward"], ["缓存堆积", "网关离线"], "可与上位机协同，但上位机更贴近具体产线业务逻辑。", "The edge gateway aggregates and forwards data near the production line.", "MQTT"),
+      N("energy-system", "能耗管理系统", "iot", "⚡", "汇总电、水、气和班次能耗，进行能效分析。", ["energyKwh", "设备状态"], ["能耗报表", "能效指标"], ["MQTT", "时序分析"], ["倍率错误", "数据断点"], "订阅上位机发布的能耗与生产上下文，实现单位产品能耗分析。", "The energy system combines consumption data with production context.", "MQTT"),
+      N("device-platform", "设备监控平台", "iot", "DP", "集中查看设备在线率、故障和运行状态。", ["在线 Topic", "报警 Topic"], ["设备健康度", "维保任务"], ["MQTT", "资产模型", "告警规则"], ["设备映射错误", "离线误判"], "接收上位机归一化后的设备状态。", "The device platform receives normalized online status and alarms.", "MQTT"),
+      N("mobile", "移动端 / 运维端", "iot", "APP", "接收报警推送、查看状态并支持运维确认。", ["报警 Topic", "状态 Topic"], ["通知", "确认", "工单"], ["MQTT Push", "移动应用", "权限"], ["推送延迟", "重复通知", "越权操作"], "上位机发布重要事件，运维人员在移动端及时响应。", "The maintenance app receives alarm notifications and equipment status.", "MQTT"),
+      N("cloud", "云平台 / IoT 平台", "iot", "☁", "跨工厂汇总数据，用于分析、远程监控与模型服务。", ["质量", "状态", "能耗", "在线消息"], ["跨厂分析", "模型结果", "远程看板"], ["MQTT", "TLS", "Device Twin"], ["网络中断", "证书过期", "数据合规"], "上位机提供经过业务化和清洗的数据，云平台做更高层汇总。", "The cloud platform aggregates clean factory data for analytics and remote monitoring.", "MQTT"),
+
+      N("sql-server", "SQL Server", "sql", "DB", "持久化生产、工艺、报警、缺陷与日志，并支持报表和追溯查询。", ["INSERT / UPDATE", "查询条件", "事务"], ["历史记录", "趋势数据", "Trace Record"], ["SQL Server", "ADO.NET / Dapper / EF", "索引", "事务"], ["连接池耗尽", "死锁", "慢查询", "磁盘不足"], "它让实时过程变成可追溯的历史证据。", "SQL Server stores production, alarm, inspection, and log history for traceability.", "SQL"),
+      N("production-record", "生产记录", "sql", "PR", "保存工单、工件、节拍和最终结果。", ["orderId", "workpieceId", "result"], ["生产履历", "报工数据"], ["关系表", "唯一键", "批量写入"], ["重复记录", "漏写"], "上位机在工件完成时写入完整生产上下文。", "Production records connect each order, workpiece, cycle, and final result.", "SQL"),
+      N("process-history", "工艺参数历史", "sql", "PH", "保存温度、压力、转速、能耗等关键过程参数。", ["Tag 快照", "时间戳"], ["趋势", "工艺追溯"], ["宽表 / 窄表", "分区", "降采样"], ["数据量过大", "时间戳错位"], "上位机按变化、周期或工件边界归档参数。", "Process history stores key tag values for trends and traceability.", "SQL"),
+      N("alarm-history", "报警历史", "sql", "AH", "保存报警开始、确认、恢复和关联设备。", ["alarmId", "等级", "时间"], ["报警履历", "MTTR 分析"], ["报警状态表", "事件表", "确认流程"], ["恢复漏记", "重复报警"], "上位机保证报警从产生到恢复均可追溯。", "Alarm history records start, acknowledgement, recovery, and related equipment.", "SQL"),
+      N("defect-record", "缺陷检测结果", "sql", "DR", "保存 frameId、缺陷类型、坐标、置信度和尺寸。", ["detectionResult", "图像索引"], ["质量追溯", "缺陷统计"], ["结构化结果", "图像路径", "坐标 JSON"], ["错件绑定", "图像丢失"], "上位机将视觉证据绑定 orderId 与 workpieceId。", "Defect records bind visual evidence to the correct order and workpiece.", "SQL"),
+      N("device-log", "设备运行日志", "sql", "LOG", "保存连接、离线、命令、错误码和维护事件。", ["设备事件", "异常日志"], ["运行日志", "故障诊断"], ["结构化日志", "归档策略"], ["日志爆量", "敏感信息"], "支持上位机故障定位和设备可靠性分析。", "Device logs support fault diagnosis and equipment reliability analysis.", "SQL")
+    ];
+
+    // ================================================================
+    // 2) 边模型：SVG 连线和动画 token 都由此生成。
+    // ================================================================
+    const edges = [
+      { id:"mes-upper", from:"mes", to:"upper-core", protocol:"HTTP / REST API", dataType:"orderId / report", description:"工单下发与生产报工" },
+      { id:"erp-upper", from:"erp", to:"upper-core", protocol:"HTTP / REST API", dataType:"material / process", description:"物料与工艺参数" },
+      { id:"wms-upper", from:"wms", to:"upper-core", protocol:"HTTP / REST API", dataType:"batch / inventory", description:"批次与库存" },
+      { id:"qms-upper", from:"qms", to:"upper-core", protocol:"HTTP / REST API", dataType:"quality rules / result", description:"质量规则与质检结果" },
+      { id:"upper-plc", from:"protocol-adapter", to:"plc", protocol:"Modbus TCP", dataType:"tags / command", description:"PLC 轮询与控制" },
+      { id:"upper-energy", from:"protocol-adapter", to:"energy-meter", protocol:"Modbus TCP", dataType:"energyKwh", description:"能耗采集" },
+      { id:"upper-sensor", from:"protocol-adapter", to:"sensor", protocol:"Modbus TCP", dataType:"temperature / pressure", description:"传感器采集" },
+      { id:"upper-instrument", from:"protocol-adapter", to:"instrument", protocol:"Modbus RTU / RS-485", dataType:"PV / SV", description:"仪表轮询" },
+      { id:"upper-vfd", from:"protocol-adapter", to:"vfd", protocol:"Modbus RTU / RS-485", dataType:"motorSpeed", description:"变频器状态" },
+      { id:"upper-field-camera", from:"protocol-adapter", to:"field-camera", protocol:"Custom TCP", dataType:"trigger / state", description:"相机控制" },
+      { id:"upper-special", from:"protocol-adapter", to:"special-device", protocol:"Custom TCP", dataType:"vendor packet", description:"厂商私有报文" },
+      { id:"upper-serial", from:"protocol-adapter", to:"serial-device", protocol:"Modbus RTU / RS-485", dataType:"serial frame", description:"串口数据" },
+      { id:"sensor-camera", from:"sensor", to:"vision-camera", protocol:"Modbus TCP", dataType:"partArrived", description:"到位触发" },
+      { id:"camera-opencv", from:"vision-camera", to:"opencv", protocol:"Custom TCP", dataType:"frameId / image", description:"图像送检" },
+      { id:"opencv-result", from:"opencv", to:"vision-result", protocol:"Custom TCP", dataType:"detectionResult", description:"缺陷结果" },
+      { id:"vision-upper", from:"vision-result", to:"process-monitor", protocol:"Custom TCP", dataType:"OK / NG", description:"视觉结果回传" },
+      { id:"upper-sql", from:"logging", to:"sql-server", protocol:"SQL", dataType:"production / alarm / defect / log", description:"历史归档" },
+      { id:"sql-wpf", from:"sql-server", to:"wpf-ui", protocol:"SQL", dataType:"trend / trace", description:"历史查询" },
+      { id:"upper-mqtt", from:"upper-core", to:"mqtt-broker", protocol:"MQTT", dataType:"status / alarm / tag", description:"实时消息发布" },
+      { id:"mqtt-scada", from:"mqtt-broker", to:"scada", protocol:"MQTT", dataType:"status", description:"看板分发" },
+      { id:"mqtt-edge", from:"mqtt-broker", to:"edge-gateway", protocol:"MQTT", dataType:"edge data", description:"边缘协同" },
+      { id:"mqtt-energy", from:"mqtt-broker", to:"energy-system", protocol:"MQTT", dataType:"energy", description:"能耗分发" },
+      { id:"mqtt-device", from:"mqtt-broker", to:"device-platform", protocol:"MQTT", dataType:"online / alarm", description:"设备平台分发" },
+      { id:"mqtt-mobile", from:"mqtt-broker", to:"mobile", protocol:"MQTT", dataType:"alarm", description:"运维推送" },
+      { id:"mqtt-cloud", from:"mqtt-broker", to:"cloud", protocol:"MQTT", dataType:"quality / status", description:"云平台分发" }
+    ];
+
+    const normalIds = { order:"ORD-260702-018", workpiece:"WP-L1-00842", frame:"FR-CAM01-60482", recipe:"RCP-A17", batch:"BAT-0702-C", material:"MAT-SHAFT-42" };
+    const defectIds = { order:"ORD-260702-019", workpiece:"WP-L1-00843", frame:"FR-CAM01-60483", recipe:"RCP-A17", batch:"BAT-0702-C", material:"MAT-SHAFT-42" };
+    const alarmIds = { order:"ORD-260702-020", workpiece:"WP-L1-00844", frame:"—", recipe:"RCP-A17", batch:"BAT-0702-D", material:"MAT-SHAFT-42" };
+
+    const S = (name, activeNodeIds, activeEdgeIds, statusText, dataObject, protocol, detailText, animationAction, tokens = [], result = "RUNNING") => ({
+      name, activeNodeIds, activeEdgeIds, statusText, dataObject, protocol, detailText, animationAction, tokens, result
+    });
+
+    function createProductionSteps(isDefect) {
+      const d = isDefect ? defectIds : normalIds;
+      const decision = isDefect ? "NG" : "OK";
+      return [
+        S("工单下发", ["mes","upper-core","task-scheduler"], ["mes-upper"], "Order Received", "orderId", "HTTP / REST API", `MES 下发 ${d.order}，上位机建立任务。`, "order", [{edgeId:"mes-upper",label:d.order}], "RUNNING"),
+        S("参数加载", ["erp","wms","qms","task-scheduler"], ["erp-upper","wms-upper","qms-upper"], "Production Context Ready", "orderId", "HTTP / REST API", "合并物料、库存、工艺配方和质量规则。", "params", [{edgeId:"erp-upper",label:"recipe"},{edgeId:"wms-upper",label:"batch"},{edgeId:"qms-upper",label:"rule"}], "RUNNING"),
+        S("设备连接", ["device-comm","protocol-adapter","plc","sensor","instrument","vfd","special-device"], ["upper-plc","upper-sensor","upper-instrument","upper-vfd","upper-special"], "Device Connected / Polling Tags", "tagId", "Modbus TCP", "协议适配层建立 TCP、RTU 和厂商设备通道。", "connect", [{edgeId:"upper-plc",label:"connect",reverse:true},{edgeId:"upper-sensor",label:"poll",reverse:true}], "RUNNING"),
+        S("设备采集", ["data-acquisition","tag-mapping","plc","sensor","energy-meter","vfd"], ["upper-plc","upper-sensor","upper-energy","upper-vfd"], "5 Tags Updated", "tagId", "Modbus TCP", "采集 temperature=36.5、pressure=0.62、motorSpeed=1450、energyKwh=128.4、partArrived=true。", "collect", [{edgeId:"upper-sensor",label:"36.5",reverse:true},{edgeId:"upper-energy",label:"128.4",reverse:true},{edgeId:"upper-vfd",label:"1450",reverse:true}], "RUNNING"),
+        S("视觉采图", ["sensor","vision-camera","field-camera","task-scheduler"], ["sensor-camera","upper-field-camera"], "Frame Captured", "frameId", "Custom TCP", `工件 ${d.workpiece} 到位，相机生成 ${d.frame}。`, "capture", [{edgeId:"sensor-camera",label:"partArrived"},{edgeId:"upper-field-camera",label:"TRIGGER"}], "RUNNING"),
+        S("视觉检测", ["vision-camera","opencv","vision-result"], ["camera-opencv","opencv-result"], `OpenCV Result: ${decision}`, "frameId", "Custom TCP", isDefect ? "ROI 内检测到边缘裂纹，confidence=0.97，尺寸 82.36 mm。" : "轮廓、孔位、尺寸均在公差范围，confidence=0.99。", "analyze", [{edgeId:"camera-opencv",label:d.frame},{edgeId:"opencv-result",label:decision}], decision),
+        S("结果聚合", ["process-monitor","alarm-engine","tag-mapping","vision-result"], ["vision-upper"], `Final Decision: ${decision}`, "workpieceId", "Custom TCP", "聚合设备状态、工艺 Tag、视觉结果和报警状态。", "aggregate", [{edgeId:"vision-upper",label:`${d.workpiece}:${decision}`}], decision),
+        S("PLC 控制", ["task-scheduler","protocol-adapter","plc"], ["upper-plc"], isDefect ? "PLC Reject / Reject Gate ON" : "PLC Release / Pass Gate ON", "workpieceId", "Modbus TCP", isDefect ? "NG 分支：上位机写 PLC 剔除位，并建立质量追溯事件。" : "OK 分支：上位机写 PLC 放行位，工件进入下一工序。", "plc-control", [{edgeId:"upper-plc",label:isDefect?"REJECT":"RELEASE"}], decision),
+        S("SQL 归档", ["logging","sql-server","production-record","process-history","alarm-history","defect-record","device-log"], ["upper-sql"], "Trace Record Committed", "workpieceId", "SQL", "生产、工艺、视觉、报警与设备日志在一个追溯上下文中提交。", "sql", [{edgeId:"upper-sql",label:"INSERT"}], decision),
+        S("MQTT 发布", ["mqtt-broker","scada","device-platform","mobile","cloud","energy-system"], ["upper-mqtt","mqtt-scada","mqtt-device","mqtt-mobile","mqtt-cloud","mqtt-energy"], isDefect ? "Quality Alarm Published" : "Status Topics Published", isDefect?"alarmId":"tagId", "MQTT", "Broker 按 Topic 将状态、质量、报警和在线消息分发给多个订阅者。", "mqtt", [{edgeId:"upper-mqtt",label:isDefect?"alarm":"status"},{edgeId:"mqtt-scada",label:"status"},{edgeId:"mqtt-mobile",label:isDefect?"ALARM":"online"},{edgeId:"mqtt-cloud",label:"quality"}], decision),
+        S("业务回传", ["mes","qms","erp","upper-core"], ["mes-upper","qms-upper","erp-upper"], "Report Uploaded", "orderId", "HTTP / REST API", "上传生产报工、质检结果、报警状态与工单进度。", "report", [{edgeId:"mes-upper",label:"report",reverse:true},{edgeId:"qms-upper",label:decision,reverse:true},{edgeId:"erp-upper",label:"consume",reverse:true}], decision),
+        S("UI 追溯查询", ["wpf-ui","sql-server"], ["sql-wpf"], "Traceability Query Completed", "workpieceId", "SQL", "WPF UI 查询趋势、报表和最近缺陷记录，形成操作员可理解的闭环。", "query", [{edgeId:"sql-wpf",label:"SELECT"}], decision)
+      ];
+    }
+
+    const scenarios = {
+      normalCycle: { title:"Normal Cycle", mode:"NORMAL · OK 生产闭环", ids:normalIds, steps:createProductionSteps(false) },
+      defectCycle: { title:"Defect Cycle", mode:"DEFECT · 视觉 NG / PLC 剔除", ids:defectIds, steps:createProductionSteps(true) },
+      alarmCycle: {
+        title:"Device Alarm Cycle", mode:"ALARM · 通信超时 / 越限报警", ids:alarmIds,
+        steps:[
+          S("工单下发", ["mes","task-scheduler"], ["mes-upper"], "Order Received", "orderId", "HTTP / REST API", "MES 工单进入，上位机构建任务上下文。", "order", [{edgeId:"mes-upper",label:alarmIds.order}]),
+          S("参数加载", ["erp","wms","qms","task-scheduler"], ["erp-upper","wms-upper","qms-upper"], "Production Context Ready", "orderId", "HTTP / REST API", "配方、批次和质量上下限加载完成。", "params", [{edgeId:"erp-upper",label:"recipe"},{edgeId:"wms-upper",label:"batch"}]),
+          S("设备连接", ["device-comm","protocol-adapter","plc","sensor"], ["upper-plc","upper-sensor"], "Polling Devices", "tagId", "Modbus TCP", "上位机开始轮询 PLC 与传感器。", "connect", [{edgeId:"upper-plc",label:"poll",reverse:true},{edgeId:"upper-sensor",label:"poll",reverse:true}]),
+          S("通信超时", ["device-comm","sensor","logging"], ["upper-sensor"], "Timeout 3000ms / Sensor Offline", "tagId", "Modbus TCP", "连续 3 次轮询无响应，数据质量从 GOOD 变为 BAD。", "timeout", [{edgeId:"upper-sensor",label:"TIMEOUT",reverse:true}], "ALARM"),
+          S("报警判断", ["alarm-engine","tag-mapping","logging","wpf-ui"], [], "ALM-COMM-102 Created", "alarmId", "Internal Event", "报警引擎执行延迟触发与防抖，生成通信报警并在 UI 弹出。", "alarm", [], "ALARM"),
+          S("SQL 归档", ["sql-server","alarm-history","device-log","logging"], ["upper-sql"], "Alarm History Committed", "alarmId", "SQL", "写入报警开始时间、设备、错误码、轮询次数和诊断上下文。", "sql", [{edgeId:"upper-sql",label:"ALARM INSERT"}], "ALARM"),
+          S("MQTT 推送", ["mqtt-broker","mobile","device-platform","scada"], ["upper-mqtt","mqtt-mobile","mqtt-device","mqtt-scada"], "Alarm Published to Maintenance", "alarmId", "MQTT", "发布 factory/line1/alarm 与 device/online，运维端收到推送。", "mqtt", [{edgeId:"upper-mqtt",label:"alarm"},{edgeId:"mqtt-mobile",label:"PUSH"},{edgeId:"mqtt-device",label:"offline"}], "ALARM"),
+          S("生产暂停", ["task-scheduler","process-monitor","plc"], ["upper-plc"], "Interlock Active / Line Hold", "alarmId", "Modbus TCP", "关键数据质量为 BAD，上位机请求 PLC 保持，避免错误继续流转。", "plc-control", [{edgeId:"upper-plc",label:"HOLD"}], "ALARM"),
+          S("状态回传", ["mes","qms","upper-core"], ["mes-upper","qms-upper"], "Alarm Status Uploaded", "alarmId", "HTTP / REST API", "向 MES / QMS 回传产线暂停和报警状态。", "report", [{edgeId:"mes-upper",label:"LINE HOLD",reverse:true},{edgeId:"qms-upper",label:"alarm",reverse:true}], "ALARM"),
+          S("运维确认", ["mobile","wpf-ui","alarm-engine"], ["mqtt-mobile"], "Operator Acknowledged", "alarmId", "MQTT", "运维人员确认报警；报警仍保持 ACTIVE，直到设备恢复。", "ack", [{edgeId:"mqtt-mobile",label:"ACK",reverse:true}], "ALARM"),
+          S("设备恢复", ["sensor","device-comm","tag-mapping","alarm-engine"], ["upper-sensor"], "Sensor Online / Alarm Recovered", "tagId", "Modbus TCP", "轮询恢复，质量变为 GOOD，报警记录补写恢复时间。", "recover", [{edgeId:"upper-sensor",label:"36.7",reverse:true}], "RECOVERED"),
+          S("UI 追溯查询", ["wpf-ui","sql-server","alarm-history"], ["sql-wpf"], "Alarm Trace Query Completed", "alarmId", "SQL", "UI 查询报警持续时间、设备日志和恢复过程。", "query", [{edgeId:"sql-wpf",label:"SELECT ALARM"}], "RECOVERED")
+        ]
+      }
+    };
+
+    const lifecycleMap = {
+      orderId: { path:["MES","上位机任务上下文","PLC / 现场执行","生产报工回传"], nodes:["mes","task-scheduler","plc","upper-core"], edges:["mes-upper","upper-plc"], text:"orderId 是一次生产任务的主线标识。它从 MES 进入上位机，关联配方、批次和工件，最终随报工结果返回 MES。", english:"The order ID links the MES order, upper-computer task, device execution, and production report." },
+      workpieceId: { path:["产线工件","视觉检测","结果聚合","SQL 追溯"], nodes:["sensor","vision-camera","opencv","process-monitor","sql-server"], edges:["sensor-camera","camera-opencv","vision-upper","upper-sql"], text:"workpieceId 将一个物理工件的到位信号、图像、过程 Tag、最终判定和 SQL 记录绑定在一起。", english:"The workpiece ID binds one physical part to its process tags, image, decision, and trace record." },
+      frameId: { path:["工业相机","OpenCV","检测结果","SQL / QMS"], nodes:["vision-camera","opencv","vision-result","sql-server","qms"], edges:["camera-opencv","opencv-result","vision-upper","upper-sql","qms-upper"], text:"frameId 是视觉证据索引。它必须与 workpieceId 一一正确绑定，避免错图、错件和错误追溯。", english:"The frame ID tracks one captured image through inspection, storage, and quality reporting." },
+      tagId: { path:["现场设备","协议适配","Tag 清洗","UI / SQL / MQTT / 报警"], nodes:["sensor","protocol-adapter","tag-mapping","wpf-ui","sql-server","mqtt-broker","alarm-engine"], edges:["upper-sensor","upper-sql","upper-mqtt"], text:"tagId 将不同协议的原始地址统一成业务变量，并携带 value、timestamp、quality 和 deviceId。", english:"The tag ID converts raw device addresses into one clean business data model." },
+      alarmId: { path:["报警判断","WPF UI","SQL","MQTT","运维端"], nodes:["alarm-engine","wpf-ui","sql-server","mqtt-broker","mobile"], edges:["upper-sql","upper-mqtt","mqtt-mobile"], text:"alarmId 贯穿报警产生、展示、确认、存储、推送和恢复，保证一次异常有完整生命周期。", english:"The alarm ID links detection, UI acknowledgement, history, notification, and recovery." }
+    };
+
+    const protocolColors = {
+      "HTTP / REST API":"#bb7dff", "Modbus TCP":"#42e6a4", "Modbus RTU / RS-485":"#ffd166",
+      "Custom TCP":"#ff9f43", "MQTT":"#35d9ff", "SQL":"#78a9ff", "Internal Event":"#ff596e"
+    };
+
+    const state = { scenario:"normalCycle", master:null, speed:1, manual:false, currentStep:-1, completedNodes:new Set(), completedEdges:new Set(), tokenSerial:0 };
+    const layerContainers = { business:"business-nodes", upper:"upper-nodes", vision:"vision-nodes", field:"field-nodes", iot:"iot-nodes", sql:"sql-nodes" };
+
+    // ================================================================
+    // 3) 基础渲染：节点、连线、时间轴。
+    // ================================================================
+    function renderNodes() {
+      Object.values(layerContainers).forEach(id => document.getElementById(id).innerHTML = "");
+      nodes.filter(n => layerContainers[n.layer]).forEach(node => {
+        const el = document.createElement("article");
+        el.className = "node-card";
+        el.id = `node-${node.id}`;
+        el.dataset.nodeId = node.id;
+        el.tabIndex = 0;
+        el.innerHTML = `<span class="node-icon">${node.icon}</span><span class="node-copy"><span class="node-title">${node.title}</span><span class="node-role">${node.role}</span></span><span class="node-state"></span>${node.protocol ? `<span class="protocol-tag">${shortProtocol(node.protocol)}</span>` : ""}`;
+        document.getElementById(layerContainers[node.layer]).appendChild(el);
+      });
+    }
+
+    function shortProtocol(p) {
+      return p.replace(" / REST API", "").replace(" / RS-485", "");
+    }
+
+    function renderEdges() {
+      const layer = document.getElementById("edge-layer");
+      layer.innerHTML = "";
+      edges.forEach(edge => {
+        const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+        group.classList.add("edge-group");
+        group.id = `edge-${edge.id}`;
+        group.dataset.protocol = edge.protocol;
+        group.style.setProperty("--edge-color", protocolColors[edge.protocol] || "#35d9ff");
+        group.innerHTML = `<path class="edge-path" id="path-${edge.id}"/><text class="edge-label" dy="-5"><textPath href="#path-${edge.id}" startOffset="50%" text-anchor="middle">${edge.protocol}</textPath></text>`;
+        layer.appendChild(group);
+      });
+      updateEdgeGeometry();
+    }
+
+    function updateEdgeGeometry() {
+      const arch = document.getElementById("architecture");
+      const svg = document.getElementById("flow-svg");
+      const base = arch.getBoundingClientRect();
+      svg.setAttribute("viewBox", `0 0 ${base.width} ${base.height}`);
+      edges.forEach(edge => {
+        const from = document.getElementById(`node-${edge.from}`);
+        const to = document.getElementById(`node-${edge.to}`);
+        const path = document.getElementById(`path-${edge.id}`);
+        if (!from || !to || !path) return;
+        const a = from.getBoundingClientRect(), b = to.getBoundingClientRect();
+        let x1 = a.left + a.width / 2 - base.left, y1 = a.top + a.height / 2 - base.top;
+        let x2 = b.left + b.width / 2 - base.left, y2 = b.top + b.height / 2 - base.top;
+        const dx = x2 - x1, dy = y2 - y1;
+        if (Math.abs(dx) > Math.abs(dy)) {
+          x1 += Math.sign(dx) * a.width / 2; x2 -= Math.sign(dx) * b.width / 2;
+          const bend = Math.max(40, Math.abs(x2 - x1) * .48);
+          path.setAttribute("d", `M ${x1} ${y1} C ${x1 + Math.sign(dx)*bend} ${y1}, ${x2 - Math.sign(dx)*bend} ${y2}, ${x2} ${y2}`);
+        } else {
+          y1 += Math.sign(dy) * a.height / 2; y2 -= Math.sign(dy) * b.height / 2;
+          const bend = Math.max(34, Math.abs(y2 - y1) * .46);
+          path.setAttribute("d", `M ${x1} ${y1} C ${x1} ${y1 + Math.sign(dy)*bend}, ${x2} ${y2 - Math.sign(dy)*bend}, ${x2} ${y2}`);
+        }
+      });
+    }
+
+    function renderTimeline() {
+      const steps = scenarios[state.scenario].steps;
+      document.getElementById("timeline-wrap").innerHTML = steps.map((s,i) => `<button class="step-chip" data-step="${i}" title="${s.detailText}"><span class="step-no">${String(i+1).padStart(2,"0")}</span><span class="step-name">${s.name}</span></button>`).join("");
+    }
+
+    // ================================================================
+    // 4) 技术详情、协议高亮、数据对象生命周期。
+    // ================================================================
+    function showNodeDetails(nodeId) {
+      const node = nodes.find(n => n.id === nodeId);
+      if (!node) return;
+      document.getElementById("detail-title").textContent = node.title;
+      document.getElementById("detail-body").innerHTML = `
+        ${detailSection("节点名称", node.title)}
+        ${detailSection("业务作用", node.role)}
+        ${detailTags("输入数据", node.inputs)}
+        ${detailTags("输出数据", node.outputs)}
+        ${detailTags("关键技术", node.technologies)}
+        ${detailTags("常见异常", node.abnormalCases)}
+        ${detailSection("和上位机的关系", node.relationToUpperComputer)}
+        <section class="detail-section"><h4>面试表达 · Simple Technical English</h4><div class="english-box">${node.interviewEnglish}</div></section>`;
+      document.getElementById("detail-drawer").classList.add("open");
+      highlightStandalone([nodeId], []);
+    }
+
+    function detailSection(title, text) { return `<section class="detail-section"><h4>${title}</h4><p>${text}</p></section>`; }
+    function detailTags(title, items) { return `<section class="detail-section"><h4>${title}</h4><div class="tag-list">${items.map(x=>`<span class="detail-tag">${x}</span>`).join("")}</div></section>`; }
+
+    function highlightProtocol(protocol) {
+      clearStandaloneFocus();
+      document.querySelectorAll(".protocol-pill").forEach(b => b.classList.toggle("active", b.dataset.protocol === protocol));
+      const relatedNodes = new Set();
+      edges.forEach(e => {
+        const group = document.getElementById(`edge-${e.id}`);
+        const match = e.protocol === protocol;
+        group.classList.toggle("protocol-focus", match);
+        group.classList.toggle("protocol-dim", !match);
+        if (match) { relatedNodes.add(e.from); relatedNodes.add(e.to); }
+      });
+      relatedNodes.forEach(id => document.getElementById(`node-${id}`)?.classList.add("active"));
+      toast(`${protocol}：已高亮 ${[...relatedNodes].length} 个相关节点和连接`);
+    }
+
+    function showDataLifecycle(objectName) {
+      const life = lifecycleMap[objectName];
+      if (!life) return;
+      clearStandaloneFocus();
+      document.querySelectorAll(".data-pill").forEach(b => b.classList.toggle("active", b.dataset.object === objectName));
+      highlightStandalone(life.nodes, life.edges);
+      document.getElementById("detail-title").textContent = `${objectName} 生命周期`;
+      document.getElementById("detail-body").innerHTML = `
+        <section class="detail-section"><h4>数据对象</h4><p><code>${objectName}</code></p></section>
+        <section class="detail-section"><h4>生命周期路径</h4><div class="life-path">${life.path.map((x,i)=>`<span class="life-node">${x}</span>${i<life.path.length-1?'<span class="life-arrow">→</span>':''}`).join("")}</div></section>
+        ${detailSection("为什么重要", life.text)}
+        <section class="detail-section"><h4>Simple Technical English</h4><div class="english-box">${life.english}</div></section>`;
+      document.getElementById("detail-drawer").classList.add("open");
+    }
+
+    function highlightStandalone(nodeIds, edgeIds) {
+      document.querySelectorAll(".node-card.active, .core-head.active").forEach(el=>el.classList.remove("active"));
+      document.querySelectorAll(".edge-group.protocol-focus,.edge-group.protocol-dim").forEach(el=>el.classList.remove("protocol-focus","protocol-dim"));
+      nodeIds.forEach(id=>document.getElementById(`node-${id}`)?.classList.add("active"));
+      edgeIds.forEach(id=>document.getElementById(`edge-${id}`)?.classList.add("protocol-focus"));
+    }
+
+    function clearStandaloneFocus() {
+      document.querySelectorAll(".protocol-pill,.data-pill").forEach(b=>b.classList.remove("active"));
+      document.querySelectorAll(".edge-group").forEach(g=>g.classList.remove("protocol-focus","protocol-dim"));
+      if (!state.master || !state.master.isActive()) document.querySelectorAll(".node-card.active,.core-head.active").forEach(n=>n.classList.remove("active"));
+    }
+
+    // ================================================================
+    // 5) GSAP 时间线：同一数据源支持自动播放、暂停、重启和逐步播放。
+    // ================================================================
+    function playScenario(name) {
+      state.scenario = name;
+      state.manual = false;
+      document.querySelectorAll(".scenario-btn").forEach(b=>b.classList.toggle("active", b.dataset.scenario === name));
+      renderTimeline();
+      buildTimeline(false);
+      state.master.play();
+    }
+
+    function buildTimeline(manual = false) {
+      resetAnimation(false);
+      state.manual = manual;
+      const scenario = scenarios[state.scenario];
+      const tl = gsap.timeline({ paused:true, defaults:{ ease:"power1.inOut" }, onComplete:()=>{
+        document.getElementById("status-state").textContent = "Cycle Completed";
+        toast(`${scenario.title} 演示完成`);
+      }});
+      scenario.steps.forEach((step, i) => {
+        const label = `step-${i}`;
+        tl.addLabel(label);
+        tl.call(() => applyStep(step, i));
+        if (step.tokens.length) {
+          step.tokens.forEach((token, tokenIndex) => addTokenTween(tl, token, label, tokenIndex));
+          tl.to({}, {duration:1.45}, label);
+        } else {
+          tl.to({}, {duration:.95}, label);
+        }
+        tl.call(() => completeStep(step, i));
+        tl.to({}, {duration:.32});
+        tl.addLabel(`step-${i}-end`);
+        if (manual) tl.addPause(`step-${i}-end`);
+      });
+      tl.timeScale(state.speed);
+      state.master = tl;
+    }
+
+    function addTokenTween(tl, token, at, offset) {
+      const path = document.getElementById(`path-${token.edgeId}`);
+      if (!path) return;
+      const color = protocolColors[edges.find(e=>e.id===token.edgeId)?.protocol] || "#35d9ff";
+      const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      group.classList.add("data-token"); group.style.color = color; group.style.opacity = 0;
+      group.innerHTML = `<circle r="5" fill="${color}"/><text x="9" y="-8">${token.label}</text>`;
+      document.getElementById("token-layer").appendChild(group);
+      const proxy = { progress: token.reverse ? 1 : 0 };
+      const target = token.reverse ? 0 : 1;
+      tl.to(proxy, {
+        progress:target, duration:1.22, ease:"power1.inOut",
+        onStart:()=>group.style.opacity=1,
+        onUpdate:()=>{
+          const len = path.getTotalLength();
+          const p = path.getPointAtLength(Math.max(0, Math.min(len, len * proxy.progress)));
+          group.setAttribute("transform", `translate(${p.x} ${p.y})`);
+        },
+        onComplete:()=>group.style.opacity=0
+      }, `${at}+=${offset * .07}`);
+    }
+
+    function applyStep(step, index) {
+      state.currentStep = index;
+      document.querySelectorAll(".node-card.active,.core-head.active").forEach(n=>n.classList.remove("active","error","ok"));
+      document.querySelectorAll(".edge-group.active,.edge-group.error").forEach(e=>e.classList.remove("active","error"));
+      step.activeNodeIds.forEach(id => document.getElementById(`node-${id}`)?.classList.add("active"));
+      step.activeEdgeIds.forEach(id => document.getElementById(`edge-${id}`)?.classList.add("active"));
+      const isError = step.result === "NG" || step.result === "ALARM";
+      if (isError) {
+        const errorTargets = step.animationAction === "plc-control" ? ["plc"] : step.activeNodeIds;
+        errorTargets.forEach(id=>document.getElementById(`node-${id}`)?.classList.add("error"));
+        step.activeEdgeIds.forEach(id=>document.getElementById(`edge-${id}`)?.classList.add("error"));
+      } else if (step.result === "OK") step.activeNodeIds.forEach(id=>document.getElementById(`node-${id}`)?.classList.add("ok"));
+      updateStatusPanel(step, index);
+      updateTimelineState(index, isError);
+      performAction(step.animationAction, step);
+    }
+
+    function completeStep(step, index) {
+      step.activeNodeIds.forEach(id => { state.completedNodes.add(id); document.getElementById(`node-${id}`)?.classList.add("done"); });
+      step.activeEdgeIds.forEach(id => { state.completedEdges.add(id); document.getElementById(`edge-${id}`)?.classList.add("done"); });
+      document.querySelector(`.step-chip[data-step="${index}"]`)?.classList.add("done");
+    }
+
+    function stepNext() {
+      if (!window.gsap) return toast("GSAP 尚未加载，请检查网络后刷新页面");
+      if (!state.master || !state.manual || state.master.progress() >= .999) buildTimeline(true);
+      state.master.timeScale(state.speed).play();
+    }
+
+    function resetAnimation(resetStatus = true) {
+      if (state.master) state.master.kill();
+      state.master = null; state.currentStep = -1; state.completedNodes.clear(); state.completedEdges.clear();
+      document.querySelectorAll(".node-card,.core-head").forEach(n=>n.classList.remove("active","done","error","ok"));
+      document.querySelectorAll(".edge-group").forEach(e=>e.classList.remove("active","done","error","protocol-focus","protocol-dim"));
+      document.getElementById("token-layer").innerHTML = "";
+      document.querySelectorAll(".step-chip").forEach(s=>s.classList.remove("active","done","error"));
+      resetActionPanels();
+      if (resetStatus) {
+        document.getElementById("status-step").textContent = `0 / ${scenarios[state.scenario].steps.length}`;
+        document.getElementById("status-state").textContent = "等待场景启动";
+        document.getElementById("status-result").textContent = "PENDING";
+      }
+    }
+
+    function animateDataToken(from, to, label) {
+      const edge = edges.find(e => e.from === from && e.to === to) || edges.find(e => e.from === to && e.to === from);
+      if (!edge || !window.gsap) return;
+      const temp = gsap.timeline();
+      addTokenTween(temp, {edgeId:edge.id,label,reverse:edge.from===to}, 0, 0);
+      return temp;
+    }
+
+    // ================================================================
+    // 6) 步骤动作：更新视觉、聚合、数据库、MQTT 与 UI 小面板。
+    // ================================================================
+    function performAction(action, step) {
+      const scenario = scenarios[state.scenario], ids = scenario.ids;
+      switch (action) {
+        case "order":
+          setText("ctx-order", ids.order); setText("ctx-recipe", "loading...");
+          gsap.fromTo("#context-card", {scale:.97,opacity:.65}, {scale:1,opacity:1,duration:.45});
+          break;
+        case "params":
+          setText("ctx-order", ids.order); setText("ctx-recipe", ids.recipe); setText("ctx-batch", ids.batch); setText("ctx-material", ids.material);
+          break;
+        case "connect":
+          setText("agg-device", "ONLINE · 8/8");
+          break;
+        case "collect":
+          setText("agg-tags", "5 · GOOD"); setText("agg-device", "ONLINE · POLLING");
+          break;
+        case "capture":
+          setText("vision-workpiece", ids.workpiece); setText("vision-frame", ids.frame);
+          const screen = document.getElementById("vision-screen");
+          screen.classList.remove("capturing"); void screen.offsetWidth; screen.classList.add("capturing");
+          gsap.fromTo("#visual-part", {x:0}, {x:78,duration:1,ease:"power2.out"});
+          break;
+        case "analyze": {
+          const isNg = step.result === "NG";
+          const v = document.getElementById("vision-screen");
+          v.classList.add("processing"); v.classList.toggle("result-ng",isNg); v.classList.toggle("result-ok",!isNg);
+          setText("vision-result", step.result); setText("vision-confidence", isNg?"0.97":"0.99"); setText("vision-size", "82.36 mm");
+          break;
+        }
+        case "aggregate": {
+          const result = step.result;
+          setText("agg-device", "ONLINE"); setText("agg-tags", "5 · GOOD"); setText("agg-vision", result); setText("agg-alarm", result==="NG"?"QUALITY ALARM":"NONE");
+          const dec = document.getElementById("agg-decision"); dec.textContent = result==="NG"?"NG · REJECT":"OK · RELEASE"; dec.className = `decision ${result.toLowerCase()}`;
+          gsap.fromTo("#aggregation-card", {scale:.95}, {scale:1,duration:.6,ease:"back.out(1.8)"});
+          break;
+        }
+        case "plc-control":
+          if (step.result === "ALARM") { setText("agg-device", "LINE HOLD"); setText("agg-alarm", "ACTIVE"); }
+          break;
+        case "timeout":
+          setText("agg-device", "SENSOR OFFLINE"); setText("agg-tags", "1 · BAD"); setText("agg-alarm", "PENDING");
+          break;
+        case "alarm": {
+          setText("agg-alarm", "ALM-COMM-102"); setText("agg-vision", "SKIPPED");
+          const dec = document.getElementById("agg-decision"); dec.textContent = "ALARM · LINE HOLD"; dec.className = "decision alarm";
+          break;
+        }
+        case "sql": {
+          const result = state.scenario==="normalCycle"?"OK":state.scenario==="defectCycle"?"NG":"ALARM";
+          setText("trace-order", ids.order); setText("trace-workpiece", ids.workpiece); setText("trace-frame", ids.frame); setText("trace-result", result); setText("trace-time", new Date().toLocaleTimeString("zh-CN",{hour12:false})); setText("trace-defect", result==="NG"?"Edge Crack":result==="ALARM"?"COMM_TIMEOUT":"None");
+          const tr = document.getElementById("trace-result"); tr.className=`trace-result ${result.toLowerCase()}`;
+          const card = document.getElementById("trace-card"); card.classList.remove("writing"); void card.offsetWidth; card.classList.add("writing");
+          break;
+        }
+        case "mqtt":
+          document.querySelectorAll(".topic").forEach((t,i)=>setTimeout(()=>t.classList.add("active"),i*130)); setText("mqtt-count", state.scenario==="defectCycle"||state.scenario==="alarmCycle"?"4 msg · ALARM":"4 msg");
+          break;
+        case "report":
+          toast("Report Uploaded · MES / QMS / ERP 已接收");
+          break;
+        case "ack": setText("agg-alarm", "ACKNOWLEDGED"); break;
+        case "recover": setText("agg-device", "ONLINE · GOOD"); setText("agg-alarm", "RECOVERED"); break;
+        case "query":
+          showMiniReport();
+          break;
+      }
+    }
+
+    function showMiniReport() {
+      const scenario = scenarios[state.scenario], isNormal = state.scenario === "normalCycle";
+      document.getElementById("detail-title").textContent = "WPF UI · 生产追溯报表";
+      document.getElementById("detail-body").innerHTML = `
+        <section class="detail-section"><h4>当前查询条件</h4><p>${scenario.ids.order} · ${scenario.ids.workpiece}</p></section>
+        <section class="detail-section"><h4>班次 KPI</h4><div class="tag-list"><span class="detail-tag">良品数：842</span><span class="detail-tag">NG 数：${isNormal?3:4}</span><span class="detail-tag">报警数：${state.scenario==="alarmCycle"?2:1}</span><span class="detail-tag">设备在线率：${state.scenario==="alarmCycle"?"97.5%":"99.8%"}</span></div></section>
+        <section class="detail-section"><h4>最近一条缺陷 / 异常记录</h4><p>${state.scenario==="defectCycle"?"Edge Crack · confidence 0.97 · CAM-01 ROI(83,62)":state.scenario==="alarmCycle"?"COMM_TIMEOUT · Sensor-03 · 3000ms":"无新增缺陷；最近记录 WP-L1-00839 · Scratch"}</p></section>
+        <section class="detail-section"><h4>UI 的真正角色</h4><p>WPF UI 统一呈现实时 Tag、控制操作、报警确认、SQL 趋势和追溯报表。它是完整上位机业务的操作入口，而不是孤立的大屏。</p></section>`;
+      document.getElementById("detail-drawer").classList.add("open");
+    }
+
+    function resetActionPanels() {
+      ["ctx-order","ctx-recipe","ctx-batch","ctx-material","vision-workpiece","vision-frame","vision-confidence","vision-size","trace-order","trace-workpiece","trace-frame","trace-result","trace-time","trace-defect"].forEach(id=>setText(id,"—"));
+      setText("vision-result","WAIT"); setText("agg-device","WAIT"); setText("agg-tags","0"); setText("agg-vision","WAIT"); setText("agg-alarm","NONE"); setText("mqtt-count","0 msg");
+      const dec=document.getElementById("agg-decision"); dec.textContent="PENDING"; dec.className="decision";
+      document.getElementById("vision-screen").className="vision-screen";
+      document.querySelectorAll(".topic").forEach(t=>t.classList.remove("active"));
+      document.getElementById("trace-card").classList.remove("writing");
+      gsap?.set?.("#visual-part",{x:0});
+    }
+
+    function updateStatusPanel(step, index) {
+      const scenario = scenarios[state.scenario], ids = scenario.ids;
+      setText("status-mode", scenario.mode); setText("status-step", `${index+1} / ${scenario.steps.length}`); setText("status-order", ids.order);
+      setText("status-workpiece", index>=4?ids.workpiece:"—"); setText("status-frame", index>=5?ids.frame:"—"); setText("status-protocol", step.protocol); setText("status-state", step.statusText); setText("status-result", step.result);
+      const resultEl=document.getElementById("status-result"); resultEl.className=step.result.toLowerCase();
+      setText("status-system", step.activeNodeIds.map(id=>nodes.find(n=>n.id===id)?.title).filter(Boolean).slice(0,2).join(" + "));
+    }
+
+    function updateTimelineState(index, isError) {
+      document.querySelectorAll(".step-chip").forEach((chip,i)=>{
+        chip.classList.toggle("active",i===index); chip.classList.toggle("done",i<index); chip.classList.toggle("error",i===index&&isError);
+      });
+    }
+
+    function previewStep(index) {
+      const step = scenarios[state.scenario].steps[index];
+      updateStatusPanel(step,index); updateTimelineState(index,step.result==="NG"||step.result==="ALARM");
+      highlightStandalone(step.activeNodeIds,step.activeEdgeIds);
+      toast(`${index+1}. ${step.name} · ${step.detailText}`);
+    }
+
+    function setText(id, value) { const el=document.getElementById(id); if(el) el.textContent=value; }
+    function toast(message) { const el=document.getElementById("toast"); el.textContent=message; el.classList.remove("show"); void el.offsetWidth; el.classList.add("show"); }
+
+    // ================================================================
+    // 7) 交互绑定与启动。
+    // ================================================================
+    function bindEvents() {
+      document.addEventListener("click", e => {
+        const node = e.target.closest("[data-node-id]"); if (node) showNodeDetails(node.dataset.nodeId);
+        const protocol = e.target.closest(".protocol-pill"); if (protocol) highlightProtocol(protocol.dataset.protocol);
+        const data = e.target.closest(".data-pill"); if (data) showDataLifecycle(data.dataset.object);
+        const scenario = e.target.closest(".scenario-btn"); if (scenario) window.gsap ? playScenario(scenario.dataset.scenario) : toast("GSAP CDN 尚未加载，请检查网络后刷新");
+        const speed = e.target.closest(".speed-btn"); if (speed) {
+          state.speed=Number(speed.dataset.speed); document.querySelectorAll(".speed-btn").forEach(b=>b.classList.toggle("active",b===speed)); if(state.master) state.master.timeScale(state.speed);
+        }
+        const chip = e.target.closest(".step-chip"); if (chip) previewStep(Number(chip.dataset.step));
+      });
+      document.addEventListener("keydown", e => {
+        if ((e.key === "Enter" || e.key === " ") && e.target.dataset?.nodeId) showNodeDetails(e.target.dataset.nodeId);
+        if (e.key === "Escape") { document.getElementById("detail-drawer").classList.remove("open"); clearStandaloneFocus(); }
+      });
+      document.getElementById("detail-close").addEventListener("click",()=>{ document.getElementById("detail-drawer").classList.remove("open"); clearStandaloneFocus(); });
+      document.getElementById("pause-btn").addEventListener("click",()=>{ if(state.master){ if(state.master.paused()){state.master.play(); setText("pause-btn","Ⅱ Pause");} else {state.master.pause(); setText("pause-btn","▶ Resume");} } });
+      document.getElementById("restart-btn").addEventListener("click",()=>window.gsap ? playScenario(state.scenario) : toast("GSAP CDN 尚未加载，请检查网络后刷新"));
+      document.getElementById("next-btn").addEventListener("click",stepNext);
+      window.addEventListener("resize",()=>requestAnimationFrame(updateEdgeGeometry));
+      window.addEventListener("load",()=>setTimeout(updateEdgeGeometry,120));
+    }
+
+    function init() {
+      renderNodes(); renderTimeline(); renderEdges(); bindEvents();
+      setText("status-mode","待机 · 请选择场景");
+      if (!window.gsap) toast("GSAP CDN 加载失败：节点详情仍可使用，动画需联网刷新");
+      requestAnimationFrame(()=>requestAnimationFrame(updateEdgeGeometry));
+    }
+
+    init();
+  </script>
+</body>
+</html>

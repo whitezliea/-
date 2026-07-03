@@ -1,0 +1,1041 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OpenCV 工业视觉检测工作流</title>
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+  <style>
+    :root {
+      --bg: #071013;
+      --panel: #0c171b;
+      --panel-2: #101e22;
+      --line: #23363b;
+      --muted: #789097;
+      --text: #e8f2f3;
+      --cyan: #27e6ce;
+      --cyan-soft: rgba(39, 230, 206, .14);
+      --amber: #ffc857;
+      --red: #ff5f67;
+      --blue: #5fb8ff;
+      --radius: 18px;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body { height: 100%; }
+
+    body {
+      margin: 0;
+      min-width: 1120px;
+      overflow: auto;
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", "Microsoft YaHei", sans-serif;
+      background:
+        radial-gradient(circle at 48% 35%, rgba(23, 81, 80, .18), transparent 34%),
+        linear-gradient(145deg, #071013 0%, #091316 55%, #050a0c 100%);
+    }
+
+    button { font: inherit; }
+
+    .app {
+      width: 100%;
+      min-height: 100vh;
+      padding: 20px 22px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .topbar {
+      min-height: 64px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+    }
+
+    .brand { display: flex; align-items: center; gap: 14px; }
+
+    .brand-mark {
+      width: 40px;
+      height: 40px;
+      border: 1px solid rgba(39, 230, 206, .45);
+      border-radius: 12px;
+      display: grid;
+      place-items: center;
+      color: var(--cyan);
+      background: rgba(39, 230, 206, .07);
+      box-shadow: inset 0 0 20px rgba(39, 230, 206, .05);
+    }
+
+    .brand-mark svg { width: 22px; height: 22px; }
+
+    .eyebrow {
+      color: var(--cyan);
+      font-size: 10px;
+      letter-spacing: .2em;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+
+    h1 { margin: 0; font-size: 20px; font-weight: 680; letter-spacing: .02em; }
+    .subtitle { margin-left: 8px; color: var(--muted); font-weight: 450; font-size: 13px; }
+
+    .system-state { display: flex; align-items: center; gap: 18px; }
+
+    .live-pill {
+      border: 1px solid rgba(39, 230, 206, .25);
+      color: #a9bebf;
+      background: rgba(39, 230, 206, .06);
+      padding: 8px 12px;
+      border-radius: 999px;
+      font: 600 10px ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: .08em;
+    }
+
+    .live-pill i {
+      display: inline-block;
+      width: 7px;
+      height: 7px;
+      margin-right: 7px;
+      border-radius: 50%;
+      background: var(--cyan);
+      box-shadow: 0 0 10px var(--cyan);
+    }
+
+    .clock { color: #819399; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+    .dashboard {
+      flex: 1;
+      min-height: 640px;
+      display: grid;
+      grid-template-columns: minmax(310px, .82fr) minmax(500px, 1.32fr) minmax(318px, .78fr);
+      gap: 14px;
+    }
+
+    .panel {
+      position: relative;
+      min-width: 0;
+      overflow: hidden;
+      border: 1px solid rgba(124, 158, 166, .18);
+      border-radius: var(--radius);
+      background: linear-gradient(180deg, rgba(16, 30, 34, .94), rgba(9, 18, 21, .96));
+      box-shadow: 0 20px 70px rgba(0, 0, 0, .18);
+    }
+
+    .panel::before {
+      content: "";
+      pointer-events: none;
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(110deg, rgba(255,255,255,.025), transparent 20%);
+    }
+
+    .panel-head {
+      position: relative;
+      z-index: 2;
+      height: 62px;
+      padding: 0 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid rgba(124, 158, 166, .13);
+    }
+
+    .panel-title { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 650; }
+
+    .panel-index {
+      color: var(--cyan);
+      font: 700 10px ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: .1em;
+    }
+
+    .panel-meta { color: #667c82; font: 10px ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+    /* Left / production scene */
+    .scene-body {
+      height: calc(100% - 62px);
+      display: grid;
+      grid-template-rows: minmax(330px, 1fr) auto;
+    }
+
+    .factory-stage {
+      position: relative;
+      min-height: 380px;
+      background:
+        linear-gradient(rgba(41, 68, 73, .06) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(41, 68, 73, .06) 1px, transparent 1px);
+      background-size: 30px 30px;
+    }
+
+    .factory-stage::after {
+      content: "LIVE PRODUCTION CELL";
+      position: absolute;
+      top: 16px;
+      left: 18px;
+      color: rgba(121, 150, 156, .38);
+      font: 9px ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: .15em;
+    }
+
+    .factory-svg { width: 100%; height: 100%; display: block; }
+
+    .belt-stripe { stroke-dasharray: 10 10; }
+
+    #sensorBeam {
+      opacity: .2;
+      filter: drop-shadow(0 0 5px var(--red));
+    }
+
+    #cameraFlash { opacity: 0; mix-blend-mode: screen; }
+    #rejectArm { transform-origin: 335px 312px; }
+    #plateScene { transform-box: fill-box; transform-origin: center; }
+
+    .scene-stats {
+      margin: 0 16px 16px;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+    }
+
+    .stat {
+      min-width: 0;
+      padding: 11px 12px;
+      border: 1px solid rgba(124, 158, 166, .12);
+      border-radius: 11px;
+      background: rgba(4, 12, 14, .5);
+    }
+
+    .stat-label { color: #677d83; font-size: 9px; letter-spacing: .08em; text-transform: uppercase; }
+    .stat-value { margin-top: 5px; font: 650 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .stat-value.cyan { color: var(--cyan); }
+    .stat-value.red { color: var(--red); }
+
+    /* Center / camera debug */
+    .vision-body {
+      height: calc(100% - 62px);
+      display: grid;
+      grid-template-rows: minmax(370px, 1fr) auto;
+      padding: 14px;
+      gap: 12px;
+    }
+
+    .viewport-shell {
+      position: relative;
+      overflow: hidden;
+      min-height: 390px;
+      border: 1px solid rgba(95, 184, 255, .18);
+      border-radius: 13px;
+      background: #071013;
+    }
+
+    .camera-toolbar {
+      position: absolute;
+      z-index: 5;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 38px;
+      padding: 0 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid rgba(118, 151, 158, .16);
+      background: rgba(6, 14, 17, .82);
+      backdrop-filter: blur(8px);
+    }
+
+    .toolbar-left, .toolbar-right { display: flex; align-items: center; gap: 9px; }
+
+    .toolbar-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--cyan); }
+    .toolbar-text { color: #8ea3a8; font: 9px ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+    .quality-chip {
+      opacity: 0;
+      transform: translateY(-4px);
+      padding: 4px 7px;
+      border: 1px solid rgba(39, 230, 206, .2);
+      border-radius: 5px;
+      color: var(--cyan);
+      background: rgba(39, 230, 206, .07);
+      font: 8px ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    .camera-view { width: 100%; height: 100%; min-height: 390px; display: block; }
+
+    .scanlines {
+      pointer-events: none;
+      position: absolute;
+      inset: 38px 0 0;
+      z-index: 4;
+      opacity: .1;
+      background: repeating-linear-gradient(0deg, transparent 0 3px, rgba(255,255,255,.08) 4px);
+    }
+
+    #imagePlate { opacity: 0; transform-box: fill-box; transform-origin: center; }
+    #roiBox, #bodyContour { stroke-dasharray: 1100; stroke-dashoffset: 1100; }
+    #roiBox { opacity: 0; }
+    #bodyContour { opacity: 0; }
+    #thresholdLayer { opacity: 0; }
+    .hole-ring, .measure-group, #defectMarker, #angleMeasure { opacity: 0; }
+    .hole-ring { transform-box: fill-box; transform-origin: center; }
+
+    .result-card {
+      position: absolute;
+      z-index: 6;
+      right: 16px;
+      top: 54px;
+      width: 180px;
+      padding: 14px;
+      opacity: 0;
+      transform: translateY(-8px) scale(.96);
+      border: 1px solid rgba(255, 95, 103, .42);
+      border-radius: 12px;
+      background: rgba(25, 11, 14, .93);
+      box-shadow: 0 18px 45px rgba(0, 0, 0, .35), 0 0 28px rgba(255, 95, 103, .08);
+    }
+
+    .result-card-top { display: flex; align-items: center; justify-content: space-between; }
+    .result-kicker { color: #a98a8c; font: 8px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .1em; }
+    .result-ng { color: var(--red); font: 800 28px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .result-reason { color: #f0c5c7; font-size: 11px; margin-top: 8px; }
+    .result-code { color: #9f777a; font: 9px ui-monospace, SFMono-Regular, Menlo, monospace; margin-top: 5px; }
+
+    .debug-dock {
+      display: grid;
+      grid-template-columns: 1.22fr .9fr;
+      gap: 10px;
+    }
+
+    .debug-card {
+      min-height: 92px;
+      padding: 12px 14px;
+      border: 1px solid rgba(124, 158, 166, .12);
+      border-radius: 11px;
+      background: rgba(4, 12, 14, .48);
+    }
+
+    .debug-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 9px;
+      color: #7f969b;
+      font: 8px ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: .08em;
+    }
+
+    .debug-title span:last-child { color: var(--cyan); }
+
+    .metric-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 6px;
+    }
+
+    .metric-box { padding: 7px 8px; border-radius: 7px; background: rgba(90, 124, 130, .07); }
+    .metric-name { color: #657a80; font-size: 8px; }
+    .metric-num { margin-top: 4px; color: #c9d9db; font: 10px ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+    .trace-lines { display: grid; gap: 5px; }
+    .trace-line { display: flex; justify-content: space-between; color: #698087; font: 8px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .trace-line b { color: #b8c9cc; font-weight: 500; }
+    .trace-line:last-child { opacity: 0; }
+
+    /* Right / workflow */
+    .workflow-body {
+      position: relative;
+      height: calc(100% - 62px);
+      padding: 12px 14px 14px;
+    }
+
+    .workflow-list {
+      position: relative;
+      display: grid;
+      gap: 6px;
+    }
+
+    .workflow-list::before {
+      content: "";
+      position: absolute;
+      z-index: 0;
+      left: 20px;
+      top: 25px;
+      bottom: 25px;
+      width: 1px;
+      background: linear-gradient(var(--cyan), rgba(74, 105, 111, .18));
+      opacity: .36;
+    }
+
+    .flow-node {
+      position: relative;
+      z-index: 1;
+      min-height: 44px;
+      padding: 7px 10px 7px 47px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      border: 1px solid rgba(119, 153, 160, .12);
+      border-radius: 9px;
+      background: rgba(8, 18, 21, .72);
+      color: #769096;
+      transition: color .25s ease;
+    }
+
+    .node-num {
+      position: absolute;
+      left: 9px;
+      top: 50%;
+      width: 23px;
+      height: 23px;
+      transform: translateY(-50%);
+      display: grid;
+      place-items: center;
+      border: 1px solid rgba(119, 153, 160, .2);
+      border-radius: 6px;
+      background: #0b1619;
+      color: #5f7479;
+      font: 700 8px ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    .node-copy { min-width: 0; }
+    .node-title { color: inherit; font-size: 10px; font-weight: 630; white-space: nowrap; }
+    .node-en { margin-top: 2px; color: #52676c; font: 7px ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
+    .node-state { color: #52676c; font: 7px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .06em; }
+
+    .flow-node.active {
+      color: #e9ffff;
+      border-color: rgba(39, 230, 206, .55);
+      background: linear-gradient(90deg, rgba(39, 230, 206, .15), rgba(39, 230, 206, .025));
+      box-shadow: 0 0 24px rgba(39, 230, 206, .08), inset 3px 0 0 var(--cyan);
+    }
+
+    .flow-node.active .node-num {
+      color: #05211e;
+      border-color: var(--cyan);
+      background: var(--cyan);
+      box-shadow: 0 0 16px rgba(39, 230, 206, .28);
+    }
+
+    .flow-node.active .node-state { color: var(--cyan); }
+
+    .flow-node.done .node-num { color: var(--cyan); border-color: rgba(39, 230, 206, .32); }
+    .flow-node.done { color: #9ab0b4; }
+
+    .frame-token {
+      position: absolute;
+      z-index: 8;
+      top: 20px;
+      left: 2px;
+      width: 40px;
+      height: 17px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--amber);
+      border-radius: 4px;
+      color: var(--amber);
+      background: #1b1a11;
+      box-shadow: 0 0 14px rgba(255, 200, 87, .22);
+      font: 700 7px ui-monospace, SFMono-Regular, Menlo, monospace;
+      pointer-events: none;
+    }
+
+    /* Bottom controls */
+    .controlbar {
+      min-height: 76px;
+      padding: 0 16px;
+      display: grid;
+      grid-template-columns: auto minmax(380px, 1fr) minmax(330px, .7fr);
+      align-items: center;
+      gap: 20px;
+      border: 1px solid rgba(124, 158, 166, .16);
+      border-radius: 16px;
+      background: rgba(11, 22, 25, .88);
+      box-shadow: 0 18px 60px rgba(0,0,0,.16);
+    }
+
+    .controls { display: flex; gap: 8px; }
+
+    .control-btn {
+      min-width: 74px;
+      height: 36px;
+      padding: 0 14px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      border: 1px solid rgba(124, 158, 166, .2);
+      border-radius: 9px;
+      color: #b8c9cc;
+      background: #0c181b;
+      cursor: pointer;
+      font-size: 10px;
+      transition: border-color .2s, color .2s, transform .2s;
+    }
+
+    .control-btn:hover { color: white; border-color: rgba(39, 230, 206, .5); transform: translateY(-1px); }
+    .control-btn.primary { color: #03211e; border-color: var(--cyan); background: var(--cyan); font-weight: 700; }
+    .control-btn svg { width: 12px; height: 12px; }
+
+    .timeline-track { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; }
+    .timecode { color: #6d8389; font: 8px ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+    .progress-rail {
+      position: relative;
+      height: 4px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #1e3034;
+    }
+
+    .progress-fill { width: 0; height: 100%; background: linear-gradient(90deg, var(--cyan), var(--blue)); box-shadow: 0 0 12px rgba(39, 230, 206, .45); }
+
+    .step-explainer { min-width: 0; padding-left: 18px; border-left: 1px solid rgba(124, 158, 166, .15); }
+    .step-kicker { color: var(--cyan); font: 700 8px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .12em; }
+    .step-label { margin-top: 5px; color: #d7e5e7; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    @media (max-height: 800px) {
+      .app { padding-top: 12px; gap: 10px; }
+      .topbar { min-height: 48px; }
+      .dashboard { min-height: 600px; }
+      .flow-node { min-height: 40px; }
+      .controlbar { min-height: 66px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M4 8V4h4M16 4h4v4M20 16v4h-4M8 20H4v-4" />
+            <circle cx="12" cy="12" r="4" /><path d="M12 8v8M8 12h8" opacity=".55" />
+          </svg>
+        </div>
+        <div>
+          <div class="eyebrow">Industrial Vision Learning Lab</div>
+          <h1>金属板在线视觉检测 <span class="subtitle">OpenCV Workflow Demonstrator</span></h1>
+        </div>
+      </div>
+      <div class="system-state">
+        <div class="live-pill"><i></i>SYSTEM ONLINE</div>
+        <div class="clock" id="clock">2026-07-02&nbsp;&nbsp;14:32:08 CST</div>
+      </div>
+    </header>
+
+    <section class="dashboard">
+      <!-- 01 Production cell -->
+      <article class="panel scene-panel">
+        <div class="panel-head">
+          <div class="panel-title"><span class="panel-index">01</span>生产现场</div>
+          <div class="panel-meta">LINE A · STATION 04</div>
+        </div>
+        <div class="scene-body">
+          <div class="factory-stage">
+            <svg class="factory-svg" viewBox="0 0 420 460" role="img" aria-label="传送带、传感器、工业相机、金属板和 PLC 生产场景">
+              <defs>
+                <linearGradient id="beltGrad" x1="0" x2="0" y1="0" y2="1">
+                  <stop offset="0" stop-color="#27383d"/><stop offset="1" stop-color="#121f23"/>
+                </linearGradient>
+                <linearGradient id="metalGrad" x1="0" x2="1" y1="0" y2="1">
+                  <stop offset="0" stop-color="#c9d0d1"/><stop offset=".5" stop-color="#778489"/><stop offset="1" stop-color="#a9b3b5"/>
+                </linearGradient>
+                <filter id="glowCyan"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+                <filter id="glowRed"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+              </defs>
+
+              <!-- Camera support and camera -->
+              <path d="M286 75H348V233" fill="none" stroke="#52676c" stroke-width="7"/>
+              <path d="M290 76H348" stroke="#93a4a7" stroke-width="2" opacity=".45"/>
+              <g id="cameraRig">
+                <rect x="237" y="96" width="92" height="58" rx="10" fill="#213136" stroke="#60767b"/>
+                <rect x="248" y="105" width="48" height="12" rx="3" fill="#101b1e"/>
+                <text x="254" y="114" fill="#7f969b" font-size="7" font-family="monospace">CV-CAM 02</text>
+                <rect x="271" y="151" width="28" height="23" rx="5" fill="#152226" stroke="#51666b"/>
+                <circle cx="285" cy="172" r="13" fill="#0b1214" stroke="#60777c" stroke-width="3"/>
+                <circle cx="285" cy="172" r="6" fill="#132d35" stroke="#27e6ce" opacity=".7"/>
+                <circle cx="313" cy="108" r="3" fill="#27e6ce" filter="url(#glowCyan)"/>
+                <path d="M285 184L251 300M285 184l34 116" fill="rgba(95,184,255,.025)" stroke="#5fb8ff" stroke-dasharray="3 5" opacity=".24"/>
+                <circle id="cameraFlash" cx="285" cy="172" r="52" fill="#dffcff" filter="url(#glowCyan)"/>
+              </g>
+
+              <!-- Sensor -->
+              <g id="sensorUnit">
+                <path d="M96 211V303" stroke="#576d72" stroke-width="7"/>
+                <rect x="75" y="196" width="43" height="30" rx="5" fill="#1c2b2f" stroke="#647a7f"/>
+                <circle cx="105" cy="211" r="4" fill="#ff5f67" filter="url(#glowRed)"/>
+                <text x="77" y="190" fill="#768e93" font-size="8" font-family="monospace">PE-01</text>
+                <line id="sensorBeam" x1="105" y1="215" x2="105" y2="324" stroke="#ff5f67" stroke-width="2"/>
+              </g>
+
+              <!-- Conveyor -->
+              <g>
+                <rect x="18" y="298" width="382" height="72" rx="16" fill="url(#beltGrad)" stroke="#40555a"/>
+                <path class="belt-stripe" d="M35 314H383" stroke="#708389" opacity=".23"/>
+                <path d="M35 356H383" stroke="#0b1214" stroke-width="2" opacity=".8"/>
+                <g fill="#0d171a" stroke="#4e6469">
+                  <circle cx="52" cy="334" r="24"/><circle cx="135" cy="334" r="24"/><circle cx="218" cy="334" r="24"/><circle cx="301" cy="334" r="24"/><circle cx="374" cy="334" r="24"/>
+                </g>
+                <g fill="none" stroke="#819297" opacity=".45">
+                  <circle cx="52" cy="334" r="9"/><circle cx="135" cy="334" r="9"/><circle cx="218" cy="334" r="9"/><circle cx="301" cy="334" r="9"/><circle cx="374" cy="334" r="9"/>
+                </g>
+                <path d="M55 370v52M365 370v52M38 422h344" stroke="#4f656a" stroke-width="6"/>
+              </g>
+
+              <!-- Moving metal plate -->
+              <g id="plateScene">
+                <rect x="-30" y="275" width="108" height="61" rx="6" fill="url(#metalGrad)" stroke="#d6dfe0"/>
+                <g fill="#18262a" stroke="#e3e8e9" stroke-width="1">
+                  <circle cx="-10" cy="291" r="6"/><circle cx="58" cy="291" r="6"/><circle cx="-10" cy="320" r="6"/><circle cx="58" cy="320" r="6"/>
+                </g>
+                <path d="M22 286c8-7 17 4 13 12s-19 7-22-1 3-8 9-11Z" fill="#6d4d43" opacity=".75"/>
+              </g>
+
+              <!-- Reject gate -->
+              <g id="rejectUnit">
+                <circle cx="335" cy="312" r="11" fill="#172529" stroke="#7c9296"/>
+                <g id="rejectArm">
+                  <path d="M335 312l43-45" stroke="#ff5f67" stroke-width="7" stroke-linecap="round"/>
+                  <path d="M373 270l15-15" stroke="#f5a7aa" stroke-width="3"/>
+                </g>
+                <text x="329" y="250" fill="#8b6f71" font-size="7" font-family="monospace">REJECT</text>
+              </g>
+
+              <!-- PLC -->
+              <g id="plcBox">
+                <rect x="21" y="44" width="102" height="85" rx="9" fill="#142226" stroke="#52686d"/>
+                <rect x="31" y="54" width="82" height="24" rx="4" fill="#071013"/>
+                <text x="39" y="69" fill="#27e6ce" font-size="9" font-family="monospace">PLC · S7</text>
+                <text x="31" y="94" fill="#70868c" font-size="7" font-family="monospace">OUT 01</text>
+                <circle id="plcLed" cx="91" cy="91" r="5" fill="#314247"/>
+                <rect x="31" y="105" width="82" height="13" rx="3" fill="#203136"/>
+                <text id="plcState" x="38" y="114" fill="#71868b" font-size="7" font-family="monospace">WAITING INPUT</text>
+                <path d="M123 86h52v106h60" fill="none" stroke="#3c555b" stroke-width="2" stroke-dasharray="3 4"/>
+              </g>
+
+              <g fill="#5f757b" font-size="8" font-family="monospace">
+                <text x="18" y="446">FLOW DIRECTION</text>
+                <path d="M106 443h62l-9-5m9 5-9 5" fill="none" stroke="#5f757b"/>
+              </g>
+            </svg>
+          </div>
+          <div class="scene-stats">
+            <div class="stat"><div class="stat-label">Line speed</div><div class="stat-value">0.42 m/s</div></div>
+            <div class="stat"><div class="stat-label">Frame ID</div><div class="stat-value cyan" id="sceneFrameId">—</div></div>
+            <div class="stat"><div class="stat-label">PLC output</div><div class="stat-value" id="plcOutput">READY</div></div>
+          </div>
+        </div>
+      </article>
+
+      <!-- 02 Vision debug -->
+      <article class="panel vision-panel">
+        <div class="panel-head">
+          <div class="panel-title"><span class="panel-index">02</span>相机图像 / OpenCV 调试视图</div>
+          <div class="panel-meta" id="viewMode">LIVE RGB · 2448×2048</div>
+        </div>
+        <div class="vision-body">
+          <div class="viewport-shell">
+            <div class="camera-toolbar">
+              <div class="toolbar-left"><i class="toolbar-dot"></i><span class="toolbar-text" id="frameLabel">等待帧输入…</span></div>
+              <div class="toolbar-right">
+                <span class="quality-chip">FOCUS 0.94</span>
+                <span class="quality-chip">EXPOSURE OK</span>
+                <span class="toolbar-text">8.4 ms</span>
+              </div>
+            </div>
+            <svg class="camera-view" viewBox="0 0 620 430" aria-label="OpenCV 检测过程调试画面">
+              <defs>
+                <linearGradient id="camBg" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#15272c"/><stop offset="1" stop-color="#091215"/></linearGradient>
+                <linearGradient id="plateGrad" x1="0" x2="1"><stop stop-color="#aab7ba"/><stop offset=".55" stop-color="#77868a"/><stop offset="1" stop-color="#9da9ac"/></linearGradient>
+                <filter id="plateShadow"><feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#000" flood-opacity=".5"/></filter>
+                <filter id="defectGlow"><feGaussianBlur stdDeviation="5" result="g"/><feMerge><feMergeNode in="g"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+                <pattern id="pixelGrid" width="20" height="20" patternUnits="userSpaceOnUse"><path d="M20 0H0v20" fill="none" stroke="#99bac0" stroke-width=".5" opacity=".06"/></pattern>
+              </defs>
+              <rect id="cameraBg" width="620" height="430" fill="url(#camBg)"/>
+              <rect width="620" height="430" fill="url(#pixelGrid)"/>
+              <g opacity=".35" stroke="#6b848a" stroke-width=".7">
+                <path d="M310 48v355M32 225h556" stroke-dasharray="3 5"/>
+                <path d="M42 67h20M42 67v20M578 67h-20M578 67v20M42 392h20M42 392v-20M578 392h-20M578 392v-20"/>
+              </g>
+
+              <g id="imagePlate" transform="rotate(-7 310 232)" filter="url(#plateShadow)">
+                <rect x="147" y="132" width="326" height="200" rx="13" fill="url(#plateGrad)" stroke="#d2dcde" stroke-width="2"/>
+                <path d="M166 155H452M165 175H453M165 307H453" stroke="#fff" opacity=".08"/>
+                <g fill="#17262a" stroke="#cbd6d8" stroke-width="2">
+                  <circle cx="190" cy="176" r="16"/><circle cx="430" cy="176" r="16"/><circle cx="190" cy="288" r="16"/><circle cx="430" cy="288" r="16"/>
+                </g>
+                <path id="plateDefect" d="M344 208c17-14 39 6 29 25-8 15-37 12-43-2-6-13 3-14 14-23Z" fill="#654c46" opacity=".88"/>
+                <path d="M352 214c6-4 16 1 18 7" fill="none" stroke="#9c7a70" stroke-width="3" opacity=".7"/>
+              </g>
+
+              <!-- Threshold-style binary layer -->
+              <g id="thresholdLayer">
+                <rect x="147" y="132" width="326" height="200" rx="13" fill="#eef3f3"/>
+                <g fill="#071013"><circle cx="190" cy="176" r="16"/><circle cx="430" cy="176" r="16"/><circle cx="190" cy="288" r="16"/><circle cx="430" cy="288" r="16"/></g>
+                <path d="M344 208c17-14 39 6 29 25-8 15-37 12-43-2-6-13 3-14 14-23Z" fill="#071013"/>
+              </g>
+
+              <!-- Computer vision overlays -->
+              <rect id="roiBox" x="124" y="108" width="372" height="248" rx="4" fill="none" stroke="#ffc857" stroke-width="2"/>
+              <g id="roiCorners" opacity="0" stroke="#ffc857" stroke-width="5">
+                <path d="M124 132v-24h24M472 108h24v24M496 332v24h-24M148 356h-24v-24" fill="none"/>
+              </g>
+              <rect id="bodyContour" x="146" y="131" width="328" height="202" rx="14" fill="none" stroke="#27e6ce" stroke-width="3"/>
+
+              <g fill="none" stroke="#5fb8ff" stroke-width="2">
+                <circle class="hole-ring" cx="190" cy="176" r="23"/><circle class="hole-ring" cx="430" cy="176" r="23"/>
+                <circle class="hole-ring" cx="190" cy="288" r="23"/><circle class="hole-ring" cx="430" cy="288" r="23"/>
+              </g>
+              <g class="measure-group" fill="#5fb8ff" font-family="monospace" font-size="10">
+                <path d="M147 365v14M473 365v14M147 373h326m-318-5-8 5 8 5m310-10 8 5-8 5" fill="none" stroke="#5fb8ff"/>
+                <rect x="280" y="363" width="61" height="20" rx="4" fill="#0a1920" stroke="#5fb8ff"/>
+                <text x="291" y="377">120.42 mm</text>
+                <path d="M493 132h14M493 332h14M501 132v200m-5-192 5-8 5 8m-10 184 5 8 5-8" fill="none" stroke="#5fb8ff"/>
+                <rect x="492" y="220" width="64" height="20" rx="4" fill="#0a1920" stroke="#5fb8ff"/>
+                <text x="500" y="234">74.98 mm</text>
+                <path d="M190 176h23" stroke="#5fb8ff"/><text x="199" y="166">Ø 8.02</text>
+              </g>
+              <g id="angleMeasure" fill="#ffc857" font-family="monospace" font-size="10">
+                <path d="M145 126h70M145 126l70-9" fill="none" stroke="#ffc857"/>
+                <path d="M186 126a41 41 0 0 0-1-5" fill="none" stroke="#ffc857"/>
+                <text x="156" y="112">θ 0.18°</text>
+              </g>
+              <g id="defectMarker" filter="url(#defectGlow)">
+                <circle cx="352" cy="223" r="35" fill="none" stroke="#ff5f67" stroke-width="3" stroke-dasharray="5 4"/>
+                <path d="M378 198l22-18" stroke="#ff5f67" stroke-width="2"/>
+                <rect x="396" y="162" width="96" height="28" rx="5" fill="#2b1115" stroke="#ff5f67"/>
+                <text x="407" y="174" fill="#ff9ea3" font-size="8" font-family="monospace">STAIN / SCORE 0.92</text>
+                <text x="407" y="183" fill="#b96f73" font-size="7" font-family="monospace">AREA 31.6 mm²</text>
+              </g>
+
+              <g fill="#779096" font-size="7" font-family="monospace">
+                <text x="45" y="416">X: 0</text><text x="543" y="416">2448 px</text><text x="8" y="73">0</text><text x="5" y="390">2048</text>
+              </g>
+            </svg>
+            <div class="scanlines"></div>
+            <div class="result-card" id="resultCard">
+              <div class="result-card-top"><span class="result-kicker">FINAL RESULT</span><span class="result-ng">NG</span></div>
+              <div class="result-reason">表面污渍面积超出阈值</div>
+              <div class="result-code">DEFECT_STAIN · CONF 0.92</div>
+            </div>
+          </div>
+
+          <div class="debug-dock">
+            <div class="debug-card">
+              <div class="debug-title"><span>MEASUREMENT BUFFER</span><span id="bufferState">NO DATA</span></div>
+              <div class="metric-row">
+                <div class="metric-box"><div class="metric-name">BODY W × H</div><div class="metric-num" id="metricBody">— × —</div></div>
+                <div class="metric-box"><div class="metric-name">HOLE COUNT</div><div class="metric-num" id="metricHoles">— / 4</div></div>
+                <div class="metric-box"><div class="metric-name">DEFECT AREA</div><div class="metric-num" id="metricDefect">— mm²</div></div>
+              </div>
+            </div>
+            <div class="debug-card">
+              <div class="debug-title"><span>TRACEABILITY</span><span id="traceState">BUFFERING</span></div>
+              <div class="trace-lines">
+                <div class="trace-line"><span>FRAME</span><b id="traceFrame">—</b></div>
+                <div class="trace-line"><span>RECIPE</span><b>PLATE_A_120×75</b></div>
+                <div class="trace-line"><span>TIMESTAMP</span><b>14:32:08.416</b></div>
+                <div class="trace-line" id="traceSaved"><span>RECORD</span><b>NG-000184 · SAVED ✓</b></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- 03 Business workflow -->
+      <aside class="panel workflow-panel">
+        <div class="panel-head">
+          <div class="panel-title"><span class="panel-index">03</span>检测业务流</div>
+          <div class="panel-meta">11 STAGES</div>
+        </div>
+        <div class="workflow-body">
+          <div class="workflow-list">
+            <div class="frame-token" id="frameToken">fID 0184</div>
+            <div class="flow-node" data-step="0"><span class="node-num">01</span><div class="node-copy"><div class="node-title">光电触发</div><div class="node-en">PHOTOELECTRIC TRIGGER</div></div><span class="node-state">WAIT</span></div>
+            <div class="flow-node" data-step="1"><span class="node-num">02</span><div class="node-copy"><div class="node-title">相机帧输入</div><div class="node-en">CAMERA FRAME INPUT</div></div><span class="node-state">WAIT</span></div>
+            <div class="flow-node" data-step="2"><span class="node-num">03</span><div class="node-copy"><div class="node-title">图像质量门</div><div class="node-en">IMAGE QUALITY GATE</div></div><span class="node-state">WAIT</span></div>
+            <div class="flow-node" data-step="3"><span class="node-num">04</span><div class="node-copy"><div class="node-title">ROI / 校正 / 预处理</div><div class="node-en">ROI · CORRECT · PREPROCESS</div></div><span class="node-state">WAIT</span></div>
+            <div class="flow-node" data-step="4"><span class="node-num">05</span><div class="node-copy"><div class="node-title">主体定位</div><div class="node-en">BODY LOCALIZATION</div></div><span class="node-state">WAIT</span></div>
+            <div class="flow-node" data-step="5"><span class="node-num">06</span><div class="node-copy"><div class="node-title">尺寸 / 位置 / 角度</div><div class="node-en">SIZE · POSITION · ANGLE</div></div><span class="node-state">WAIT</span></div>
+            <div class="flow-node" data-step="6"><span class="node-num">07</span><div class="node-copy"><div class="node-title">孔数 / 孔位 / 孔径</div><div class="node-en">HOLE INSPECTION</div></div><span class="node-state">WAIT</span></div>
+            <div class="flow-node" data-step="7"><span class="node-num">08</span><div class="node-copy"><div class="node-title">缺陷 / 污渍检测</div><div class="node-en">DEFECT · STAIN DETECTION</div></div><span class="node-state">WAIT</span></div>
+            <div class="flow-node" data-step="8"><span class="node-num">09</span><div class="node-copy"><div class="node-title">结果聚合</div><div class="node-en">RESULT AGGREGATION</div></div><span class="node-state">WAIT</span></div>
+            <div class="flow-node" data-step="9"><span class="node-num">10</span><div class="node-copy"><div class="node-title">PLC OK / NG 输出</div><div class="node-en">PLC OUTPUT</div></div><span class="node-state">WAIT</span></div>
+            <div class="flow-node" data-step="10"><span class="node-num">11</span><div class="node-copy"><div class="node-title">UI 调试视图</div><div class="node-en">UI DEBUG VIEW</div></div><span class="node-state">WAIT</span></div>
+          </div>
+        </div>
+      </aside>
+    </section>
+
+    <footer class="controlbar">
+      <div class="controls">
+        <button class="control-btn primary" id="playBtn" type="button" aria-label="播放动画">
+          <svg viewBox="0 0 12 12" fill="currentColor"><path d="M2 1.2 10 6l-8 4.8Z"/></svg>播放
+        </button>
+        <button class="control-btn" id="pauseBtn" type="button" aria-label="暂停动画">
+          <svg viewBox="0 0 12 12" fill="currentColor"><path d="M2 1h3v10H2zm5 0h3v10H7z"/></svg>暂停
+        </button>
+        <button class="control-btn" id="restartBtn" type="button" aria-label="重新开始动画">
+          <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M10.4 4.5A4.7 4.7 0 1 0 10 8M10.4 1v3.5H7"/></svg>重播
+        </button>
+      </div>
+      <div class="timeline-track">
+        <span class="timecode" id="currentTime">00:00</span>
+        <div class="progress-rail"><div class="progress-fill" id="progressFill"></div></div>
+        <span class="timecode" id="totalTime">00:24</span>
+      </div>
+      <div class="step-explainer">
+        <div class="step-kicker" id="stepKicker">READY · STEP 00</div>
+        <div class="step-label" id="stepLabel">点击播放，观察一块金属板如何完成全流程检测。</div>
+      </div>
+    </footer>
+  </main>
+
+  <script>
+    // ---------------------------
+    // Demo data: modify here first
+    // ---------------------------
+    const FRAME_ID = "F-260702-0184";
+    const STEP_COPY = [
+      "光电传感器发现工件到位，向视觉系统发送拍照触发信号。",
+      "工业相机冻结当前画面，并把带 frameId 的图像送入检测管线。",
+      "先检查清晰度与曝光；质量合格的图像才进入后续算法。",
+      "裁出金属板 ROI，校正轻微旋转，再完成灰度化与二值化。",
+      "从背景中提取最大轮廓，锁定金属板主体的位置。",
+      "计算外接矩形，得到宽高、中心位置与偏转角度。",
+      "寻找四个圆孔，并逐一核对数量、孔位和直径。",
+      "检查表面异常；此处发现一块超出阈值的深色污渍。",
+      "汇总尺寸、孔位与缺陷结果，最终判定为 NG。",
+      "把 NG 信号写入 PLC，剔除机构将不良品推出产线。",
+      "保存原图、叠加图、结果与时间戳，便于追溯和调试。"
+    ];
+
+    const nodes = gsap.utils.toArray(".flow-node");
+    const token = document.querySelector("#frameToken");
+    const stepLabel = document.querySelector("#stepLabel");
+    const stepKicker = document.querySelector("#stepKicker");
+    const progressFill = document.querySelector("#progressFill");
+    const currentTime = document.querySelector("#currentTime");
+
+    let activeStep = -1;
+    let master;
+
+    function formatTime(seconds) {
+      const s = Math.max(0, Math.floor(seconds));
+      return `00:${String(s).padStart(2, "0")}`;
+    }
+
+    function tokenY(index) {
+      const node = nodes[index];
+      return node.offsetTop + node.offsetHeight / 2 - token.offsetHeight / 2;
+    }
+
+    function setActiveStep(index) {
+      activeStep = index;
+      nodes.forEach((node, i) => {
+        node.classList.toggle("active", i === index);
+        node.classList.toggle("done", i < index);
+        node.querySelector(".node-state").textContent = i < index ? "DONE" : i === index ? "RUN" : "WAIT";
+      });
+      if (index >= 0) {
+        stepKicker.textContent = `RUNNING · STEP ${String(index + 1).padStart(2, "0")}`;
+        stepLabel.textContent = STEP_COPY[index];
+      }
+    }
+
+    function moveToken(tl, index, position) {
+      tl.call(() => setActiveStep(index), null, position)
+        .to(token, { y: tokenY(index), duration: .48, ease: "power2.inOut" }, position);
+    }
+
+    function updateProgress() {
+      if (!master) return;
+      const pct = master.progress() * 100;
+      progressFill.style.width = `${pct}%`;
+      currentTime.textContent = formatTime(master.time());
+    }
+
+    function resetVisuals() {
+      setActiveStep(-1);
+      nodes.forEach(node => {
+        node.classList.remove("done", "active");
+        node.querySelector(".node-state").textContent = "WAIT";
+      });
+
+      gsap.set(token, { y: tokenY(0), opacity: 1 });
+      gsap.set("#plateScene", { x: 0, y: 0, rotation: 0, opacity: 1 });
+      gsap.set(".belt-stripe", { strokeDashoffset: 0 });
+      gsap.set("#sensorBeam", { opacity: .2 });
+      gsap.set("#cameraFlash", { opacity: 0, scale: .6, transformOrigin: "center" });
+      gsap.set("#imagePlate", { opacity: 0, rotation: -7, transformOrigin: "310px 232px", filter: "grayscale(0) contrast(1)" });
+      gsap.set("#cameraBg", { fill: "url(#camBg)" });
+      gsap.set("#roiBox", { opacity: 0, strokeDashoffset: 1100 });
+      gsap.set("#roiCorners", { opacity: 0 });
+      gsap.set("#thresholdLayer", { opacity: 0 });
+      gsap.set("#bodyContour", { opacity: 0, strokeDashoffset: 1100 });
+      gsap.set(".hole-ring", { opacity: 0, scale: .55 });
+      gsap.set(".measure-group, #angleMeasure, #defectMarker", { opacity: 0 });
+      gsap.set("#resultCard", { opacity: 0, y: -8, scale: .96 });
+      gsap.set("#rejectArm", { rotation: 0, transformOrigin: "335px 312px" });
+      gsap.set("#plcLed", { fill: "#314247" });
+      gsap.set(".quality-chip", { opacity: 0, y: -4 });
+      gsap.set("#traceSaved", { opacity: 0 });
+      gsap.set("#defectMarker circle", { rotation: 0, transformOrigin: "352px 223px" });
+
+      document.querySelector("#sceneFrameId").textContent = "—";
+      document.querySelector("#plcOutput").textContent = "READY";
+      document.querySelector("#plcOutput").className = "stat-value";
+      document.querySelector("#plcState").textContent = "WAITING INPUT";
+      document.querySelector("#plcState").setAttribute("fill", "#71868b");
+      document.querySelector("#frameLabel").textContent = "等待帧输入…";
+      document.querySelector("#viewMode").textContent = "LIVE RGB · 2448×2048";
+      document.querySelector("#bufferState").textContent = "NO DATA";
+      document.querySelector("#metricBody").textContent = "— × —";
+      document.querySelector("#metricHoles").textContent = "— / 4";
+      document.querySelector("#metricDefect").textContent = "— mm²";
+      document.querySelector("#traceFrame").textContent = "—";
+      document.querySelector("#traceState").textContent = "BUFFERING";
+      stepKicker.textContent = "READY · STEP 00";
+      stepLabel.textContent = "点击播放，观察一块金属板如何完成全流程检测。";
+    }
+
+    function buildTimeline() {
+      if (master) master.kill();
+      resetVisuals();
+
+      master = gsap.timeline({
+        paused: true,
+        defaults: { ease: "power2.inOut" },
+        onUpdate: updateProgress,
+        onComplete: () => {
+          stepKicker.textContent = "COMPLETE · NG ARCHIVED";
+          stepLabel.textContent = "检测完成：不良品已剔除，图像与检测数据已写入追溯记录。";
+        }
+      });
+
+      // 01 — Photoelectric trigger
+      moveToken(master, 0, 0);
+      master
+        .to(".belt-stripe", { strokeDashoffset: -60, duration: 2.2, ease: "none" }, 0)
+        .to("#plateScene", { x: 116, duration: 1.55, ease: "power1.inOut" }, .1)
+        .to("#sensorBeam", { opacity: 1, duration: .12, repeat: 3, yoyo: true }, 1.3);
+
+      // 02 — Capture frame
+      moveToken(master, 1, 2.0);
+      master
+        .to("#plateScene", { x: 218, duration: 1.05 }, 2.0)
+        .to("#cameraFlash", { opacity: .95, scale: 1.25, duration: .12, repeat: 1, yoyo: true }, 2.55)
+        .to("#imagePlate", { opacity: 1, duration: .32 }, 2.72)
+        .call(() => {
+          document.querySelector("#sceneFrameId").textContent = "0184";
+          document.querySelector("#frameLabel").textContent = `${FRAME_ID} · 14:32:08.416`;
+          document.querySelector("#traceFrame").textContent = FRAME_ID;
+        }, null, 2.72);
+
+      // 03 — Quality gate
+      moveToken(master, 2, 4.0);
+      master
+        .to(".quality-chip", { opacity: 1, y: 0, duration: .3, stagger: .12 }, 4.2)
+        .fromTo(".toolbar-dot", { scale: .7 }, { scale: 1.5, repeat: 3, yoyo: true, duration: .18 }, 4.3);
+
+      // 04 — ROI, rotation correction, grayscale and threshold
+      moveToken(master, 3, 6.0);
+      master
+        .to("#roiBox", { opacity: 1, strokeDashoffset: 0, duration: .75 }, 6.1)
+        .to("#roiCorners", { opacity: 1, duration: .25 }, 6.35)
+        .to("#imagePlate", { rotation: 0, duration: .65, ease: "back.out(1.4)" }, 6.9)
+        .to("#imagePlate", { filter: "grayscale(1) contrast(1.2)", duration: .45 }, 7.25)
+        .call(() => document.querySelector("#viewMode").textContent = "GRAY → BINARY · ROI 01", null, 7.25)
+        .to("#thresholdLayer", { opacity: .78, duration: .22, repeat: 1, yoyo: true }, 7.78);
+
+      // 05 — Body localization / contour
+      moveToken(master, 4, 8.35);
+      master
+        .to("#thresholdLayer", { opacity: 0, duration: .25 }, 8.35)
+        .to("#imagePlate", { filter: "grayscale(.15) contrast(1.05)", duration: .25 }, 8.35)
+        .to("#bodyContour", { opacity: 1, strokeDashoffset: 0, duration: 1.05, ease: "none" }, 8.55)
+        .call(() => document.querySelector("#bufferState").textContent = "CONTOUR FOUND", null, 9.2);
+
+      // 06 — Size, position, angle
+      moveToken(master, 5, 10.3);
+      master
+        .to(".measure-group", { opacity: 1, duration: .55 }, 10.5)
+        .to("#angleMeasure", { opacity: 1, duration: .35 }, 10.72)
+        .call(() => {
+          document.querySelector("#metricBody").textContent = "120.42 × 74.98";
+          document.querySelector("#bufferState").textContent = "3 / 6 FEATURES";
+        }, null, 10.85);
+
+      // 07 — Hole inspection
+      moveToken(master, 6, 12.25);
+      master
+        .to(".hole-ring", { opacity: 1, scale: 1, duration: .38, stagger: .15, ease: "back.out(2)" }, 12.5)
+        .call(() => {
+          document.querySelector("#metricHoles").textContent = "4 / 4 · PASS";
+          document.querySelector("#bufferState").textContent = "5 / 6 FEATURES";
+        }, null, 13.18);
+
+      // 08 — Defect detection
+      moveToken(master, 7, 14.25);
+      master
+        .to("#defectMarker", { opacity: 1, duration: .28 }, 14.5)
+        .to("#defectMarker circle", { rotation: 40, duration: 1.1, ease: "none" }, 14.5)
+        .fromTo("#plateDefect", { opacity: .45 }, { opacity: 1, duration: .28, repeat: 3, yoyo: true }, 14.6)
+        .call(() => {
+          document.querySelector("#metricDefect").textContent = "31.6 mm² · NG";
+          document.querySelector("#metricDefect").style.color = "#ff5f67";
+          document.querySelector("#bufferState").textContent = "6 / 6 FEATURES";
+        }, null, 15.1);
+
+      // 09 — Aggregate to NG
+      moveToken(master, 8, 16.25);
+      master
+        .to("#resultCard", { opacity: 1, y: 0, scale: 1, duration: .5, ease: "back.out(1.5)" }, 16.5)
+        .call(() => document.querySelector("#bufferState").textContent = "RESULT · NG", null, 16.65);
+
+      // 10 — PLC output and reject
+      moveToken(master, 9, 18.25);
+      master
+        .call(() => {
+          const output = document.querySelector("#plcOutput");
+          output.textContent = "NG / REJECT";
+          output.className = "stat-value red";
+          document.querySelector("#plcState").textContent = "OUT 01 = NG";
+          document.querySelector("#plcState").setAttribute("fill", "#ff5f67");
+        }, null, 18.45)
+        .to("#plcLed", { fill: "#ff5f67", duration: .12, repeat: 5, yoyo: true }, 18.45)
+        .to("#rejectArm", { rotation: 48, duration: .42, ease: "back.out(1.8)" }, 19.05)
+        .to("#plateScene", { x: 335, y: 95, rotation: 18, opacity: 0, duration: .85, ease: "power2.in" }, 19.05);
+
+      // 11 — Debug UI and traceability
+      moveToken(master, 10, 20.55);
+      master
+        .to("#traceSaved", { opacity: 1, duration: .4 }, 20.85)
+        .call(() => document.querySelector("#traceState").textContent = "ARCHIVED ✓", null, 20.9)
+        .to("#resultCard", { boxShadow: "0 18px 45px rgba(0,0,0,.35), 0 0 34px rgba(255,95,103,.22)", duration: .5, repeat: 1, yoyo: true }, 21.1)
+        .to({}, { duration: 1.1 });
+
+      document.querySelector("#totalTime").textContent = formatTime(master.duration());
+      updateProgress();
+    }
+
+    document.querySelector("#playBtn").addEventListener("click", () => {
+      if (master.progress() === 1) master.restart();
+      else master.play();
+    });
+    document.querySelector("#pauseBtn").addEventListener("click", () => master.pause());
+    document.querySelector("#restartBtn").addEventListener("click", () => master.restart());
+    window.addEventListener("resize", () => {
+      const y = activeStep >= 0 ? tokenY(activeStep) : tokenY(0);
+      gsap.set(token, { y });
+    });
+
+    buildTimeline();
+  </script>
+</body>
+</html>

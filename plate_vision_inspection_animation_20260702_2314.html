@@ -1,0 +1,945 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>金属连接板 · 机器视觉检测动画小剧场</title>
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+  <style>
+    :root {
+      --bg: #07101b;
+      --panel: rgba(14, 28, 43, 0.92);
+      --panel-2: #0c1928;
+      --line: rgba(135, 169, 196, 0.18);
+      --text: #ecf7ff;
+      --muted: #86a1b8;
+      --cyan: #26d6ee;
+      --blue: #4d8dff;
+      --green: #33df90;
+      --orange: #ffae42;
+      --red: #ff5f6d;
+      --violet: #ad82ff;
+      --shadow: 0 18px 50px rgba(0,0,0,.28);
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--text); font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    body {
+      background:
+        radial-gradient(circle at 18% 8%, rgba(38,214,238,.08), transparent 28%),
+        radial-gradient(circle at 82% 0%, rgba(77,141,255,.10), transparent 26%),
+        linear-gradient(180deg, #07111d, #050c14 72%);
+      overflow-x: hidden;
+    }
+    button { font: inherit; }
+    .app { width: min(1780px, 100%); min-height: 100vh; margin: 0 auto; padding: 18px; }
+    .topbar {
+      display: grid; grid-template-columns: 1fr auto; gap: 20px; align-items: center;
+      margin-bottom: 14px; padding: 4px 4px 0;
+    }
+    .eyebrow { color: var(--cyan); font: 700 11px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .16em; text-transform: uppercase; }
+    h1 { margin: 7px 0 4px; font-size: clamp(22px, 2.1vw, 34px); line-height: 1.15; letter-spacing: -.025em; }
+    .subtitle { color: var(--muted); font-size: 13px; }
+    .legend { display: flex; gap: 13px; align-items: center; padding: 10px 13px; border: 1px solid var(--line); border-radius: 12px; background: rgba(10,22,34,.65); color: var(--muted); font-size: 11px; }
+    .legend span { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+    .legend i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; box-shadow: 0 0 12px currentColor; }
+    .legend .processing { color: var(--cyan); } .legend .ok { color: var(--green); } .legend .ng { color: var(--red); }
+
+    .theatre { display: grid; grid-template-columns: minmax(310px, .82fr) minmax(480px, 1.28fr) minmax(370px, .98fr); gap: 12px; min-height: 740px; }
+    .panel { position: relative; min-width: 0; border: 1px solid var(--line); border-radius: 16px; background: linear-gradient(180deg, rgba(15,31,47,.94), rgba(9,20,32,.96)); box-shadow: var(--shadow); overflow: hidden; }
+    .panel::before { content: ""; position: absolute; inset: 0 0 auto; height: 1px; background: linear-gradient(90deg, transparent, rgba(38,214,238,.6), transparent); pointer-events: none; }
+    .panel-head { height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 16px; border-bottom: 1px solid var(--line); background: rgba(7,16,27,.42); }
+    .panel-head h2 { margin: 0; font-size: 14px; letter-spacing: .01em; }
+    .panel-head p { margin: 4px 0 0; color: var(--muted); font-size: 10px; }
+    .panel-index { display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid rgba(38,214,238,.3); border-radius: 8px; color: var(--cyan); background: rgba(38,214,238,.06); font: 800 11px ui-monospace, monospace; }
+    .panel-title { display: flex; align-items: center; gap: 10px; }
+
+    /* 左侧：现场 */
+    .scene-wrap { position: relative; height: 500px; padding: 9px; background: linear-gradient(180deg, rgba(12,28,42,.7), rgba(6,14,24,.8)); }
+    #factoryScene { width: 100%; height: 100%; display: block; }
+    .scene-device { transition: opacity .25s ease; }
+    .device-shell { fill: #12263a; stroke: #39536b; stroke-width: 2; }
+    .device-label { fill: #b9d1e3; font-size: 11px; font-weight: 700; }
+    .device-sub { fill: #6f8aa1; font-size: 8px; }
+    .scene-device.is-active .device-shell, .scene-device.is-active .active-stroke { stroke: var(--cyan); filter: drop-shadow(0 0 8px rgba(38,214,238,.65)); }
+    .scene-device.is-ok .device-shell { stroke: var(--green); filter: drop-shadow(0 0 8px rgba(51,223,144,.6)); }
+    .scene-device.is-ng .device-shell { stroke: var(--red); filter: drop-shadow(0 0 9px rgba(255,95,109,.7)); }
+    #sceneWorkpiece { transform-box: fill-box; transform-origin: center; }
+    #sceneFrameCard { opacity: 0; }
+    #cameraFlash { opacity: 0; }
+    #rejectArm { transform-box: fill-box; transform-origin: 100% 0%; }
+    .mini-status-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; padding: 10px; border-top: 1px solid var(--line); }
+    .mini-card { min-height: 60px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: rgba(7,16,26,.65); }
+    .mini-card .k { display: block; color: var(--muted); font-size: 9px; letter-spacing: .08em; text-transform: uppercase; }
+    .mini-card .v { display: block; margin-top: 6px; color: #dff8ff; font: 700 12px ui-monospace, monospace; }
+    .mini-card .v.accent { color: var(--cyan); }
+
+    /* 中间：调试视图 */
+    .vision-body { padding: 12px; }
+    .screen {
+      position: relative; height: 440px; overflow: hidden; border: 1px solid rgba(112,150,181,.24); border-radius: 13px;
+      background: #07111c;
+    }
+    .screen::before { content: ""; position: absolute; inset: 0; background-image: linear-gradient(rgba(90,132,163,.06) 1px, transparent 1px), linear-gradient(90deg, rgba(90,132,163,.06) 1px, transparent 1px); background-size: 24px 24px; pointer-events: none; z-index: 3; }
+    .screen::after { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 1px; background: var(--cyan); box-shadow: 0 0 15px var(--cyan); opacity: .55; animation: scan 3.2s linear infinite; z-index: 4; }
+    @keyframes scan { 0% { transform: translateY(18px); opacity: 0; } 15% { opacity: .5; } 85% { opacity: .35; } 100% { transform: translateY(410px); opacity: 0; } }
+    #visionSvg { width: 100%; height: 100%; display: block; }
+    .vision-overlay { opacity: 0; pointer-events: none; }
+    .screen-badge { position: absolute; z-index: 7; top: 11px; left: 12px; display: flex; gap: 7px; align-items: center; padding: 6px 9px; border: 1px solid rgba(38,214,238,.25); border-radius: 7px; background: rgba(4,12,20,.82); color: #b7d5e7; font: 700 10px ui-monospace, monospace; }
+    .screen-badge i { width: 7px; height: 7px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 10px var(--cyan); }
+    .screen-stage { position: absolute; z-index: 7; top: 11px; right: 12px; max-width: 54%; padding: 6px 9px; border-radius: 7px; background: rgba(4,12,20,.82); color: var(--cyan); font: 700 10px ui-monospace, monospace; text-align: right; }
+    .crosshair { stroke: #45e2f2; stroke-width: 1; opacity: .48; stroke-dasharray: 4 6; }
+    .hud-card { fill: rgba(5,14,23,.88); stroke: rgba(129,169,198,.34); }
+    .hud-text { fill: #9bb3c6; font: 10px ui-monospace, monospace; }
+    .hud-value { fill: #eaf8ff; font: 700 12px ui-monospace, monospace; }
+    .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 9px; }
+    .metric { min-width: 0; padding: 9px 10px; border: 1px solid var(--line); border-radius: 9px; background: rgba(6,15,24,.66); }
+    .metric span { display: block; color: var(--muted); font-size: 8px; letter-spacing: .1em; text-transform: uppercase; }
+    .metric strong { display: block; margin-top: 5px; overflow: hidden; color: #e8f7ff; font: 750 11px ui-monospace, monospace; text-overflow: ellipsis; white-space: nowrap; }
+    .metric strong.ok { color: var(--green); } .metric strong.ng { color: var(--red); } .metric strong.active { color: var(--cyan); }
+    .log-strip { height: 68px; margin-top: 9px; padding: 9px 11px; overflow: hidden; border: 1px solid var(--line); border-radius: 9px; background: #060e17; font: 10px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .log-line { color: #84a2b9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .log-line .time { color: #536d81; } .log-line .info { color: var(--cyan); } .log-line .warn { color: var(--orange); } .log-line .fail { color: var(--red); } .log-line .pass { color: var(--green); }
+
+    /* 右侧：流程 */
+    .flow-panel { display: grid; grid-template-rows: 58px minmax(350px, 1fr) 294px; }
+    .flow-scroll { position: relative; overflow-y: auto; padding: 13px 13px 18px; scrollbar-width: thin; scrollbar-color: #29455b transparent; }
+    .flow-stack { position: relative; display: grid; gap: 7px; padding-left: 21px; }
+    .flow-stack::before { content: ""; position: absolute; left: 8px; top: 17px; bottom: 17px; width: 1px; background: linear-gradient(var(--cyan), #31516a 28%, #31516a 78%, transparent); opacity: .48; }
+    .flow-row { position: relative; display: grid; grid-template-columns: minmax(0,1fr); gap: 6px; }
+    .flow-row.branch { grid-template-columns: repeat(2, minmax(0,1fr)); }
+    .flow-row.branch.three { grid-template-columns: repeat(3, minmax(0,1fr)); }
+    .flow-node { position: relative; width: 100%; min-height: 42px; padding: 7px 9px 7px 11px; border: 1px solid rgba(118,153,181,.18); border-radius: 9px; color: #adc5d8; background: rgba(8,19,30,.72); cursor: pointer; text-align: left; transition: border-color .2s ease, background .2s ease, transform .2s ease, color .2s ease; }
+    .flow-node::before { content: ""; position: absolute; left: -18px; top: 50%; width: 8px; height: 8px; border: 2px solid #42617a; border-radius: 50%; background: #0a1724; transform: translateY(-50%); }
+    .flow-row.branch .flow-node::before { left: -6px; }
+    .flow-node:hover { transform: translateX(2px); border-color: rgba(38,214,238,.48); color: #e7f9ff; }
+    .flow-node .n { display: block; font-size: 10px; font-weight: 750; line-height: 1.2; }
+    .flow-node .e { display: block; margin-top: 3px; color: #607d92; font: 8px ui-monospace, monospace; text-transform: uppercase; }
+    .flow-node.is-active { border-color: var(--cyan); color: #effdff; background: linear-gradient(90deg, rgba(38,214,238,.18), rgba(38,214,238,.04)); box-shadow: 0 0 22px rgba(38,214,238,.12), inset 3px 0 0 var(--cyan); }
+    .flow-node.is-active::before { border-color: var(--cyan); background: var(--cyan); box-shadow: 0 0 12px var(--cyan); }
+    .flow-node.is-selected { outline: 1px solid rgba(173,130,255,.85); outline-offset: 2px; }
+    .flow-node.kind-error { border-color: rgba(255,174,66,.2); } .flow-node.kind-error.is-active { border-color: var(--orange); background: rgba(255,174,66,.12); box-shadow: inset 3px 0 0 var(--orange); }
+    .flow-node.kind-ok { border-color: rgba(51,223,144,.2); } .flow-node.kind-ok.is-active { border-color: var(--green); background: rgba(51,223,144,.12); box-shadow: inset 3px 0 0 var(--green); }
+    .flow-node.kind-ng { border-color: rgba(255,95,109,.22); } .flow-node.kind-ng.is-active { border-color: var(--red); background: rgba(255,95,109,.12); box-shadow: inset 3px 0 0 var(--red); }
+    .flow-token { position: absolute; z-index: 8; left: 2px; top: 15px; width: 13px; height: 13px; border-radius: 50%; background: var(--cyan); border: 3px solid #08202c; box-shadow: 0 0 16px var(--cyan); pointer-events: none; }
+
+    .detail { position: relative; border-top: 1px solid var(--line); background: rgba(6,14,23,.8); overflow: auto; padding: 12px 14px 15px; }
+    .detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 9px; }
+    .detail-kicker { color: var(--violet); font: 750 8px ui-monospace, monospace; letter-spacing: .12em; text-transform: uppercase; }
+    #detailTitle { margin: 4px 0 0; font-size: 14px; }
+    #detailStepNo { flex: 0 0 auto; padding: 4px 7px; border: 1px solid rgba(173,130,255,.28); border-radius: 5px; color: #bea2ff; font: 700 8px ui-monospace, monospace; }
+    .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px 12px; }
+    .detail-item { min-width: 0; }
+    .detail-item.wide { grid-column: 1 / -1; }
+    .detail-item h4 { margin: 0 0 3px; color: #668399; font-size: 8px; letter-spacing: .08em; text-transform: uppercase; }
+    .detail-item p { margin: 0; color: #b8ccda; font-size: 9px; line-height: 1.45; }
+    .tags { display: flex; flex-wrap: wrap; gap: 4px; }
+    .tag { padding: 3px 5px; border: 1px solid rgba(38,214,238,.18); border-radius: 4px; background: rgba(38,214,238,.06); color: #85dce8; font-size: 8px; }
+    .english { margin-top: 9px; padding: 8px 9px; border-left: 2px solid var(--violet); border-radius: 0 6px 6px 0; background: rgba(173,130,255,.07); color: #d8caff; font: 9px/1.45 ui-monospace, monospace; }
+
+    /* 底部控制台 */
+    .controlbar { display: grid; grid-template-columns: auto minmax(220px, 1fr) auto; align-items: center; gap: 13px; margin-top: 12px; padding: 11px 13px; border: 1px solid var(--line); border-radius: 14px; background: rgba(10,23,36,.92); box-shadow: var(--shadow); }
+    .controls, .scenario { display: flex; align-items: center; gap: 6px; }
+    .control-btn, .scenario-btn { border: 1px solid rgba(125,160,188,.22); border-radius: 7px; color: #a9c1d2; background: #0b1a29; cursor: pointer; transition: .2s ease; }
+    .control-btn { min-width: 66px; height: 34px; padding: 0 11px; font-size: 10px; }
+    .control-btn:hover, .scenario-btn:hover { border-color: var(--cyan); color: #effdff; }
+    .control-btn.primary { border-color: rgba(38,214,238,.45); color: var(--cyan); background: rgba(38,214,238,.08); }
+    .control-btn:disabled { opacity: .42; cursor: not-allowed; }
+    .now { min-width: 0; display: grid; grid-template-columns: auto minmax(150px,1fr) auto auto; gap: 10px; align-items: center; }
+    .step-count { color: #5f7d93; font: 700 9px ui-monospace, monospace; }
+    .step-copy { min-width: 0; }
+    #currentStepTitle { display: block; overflow: hidden; color: #e6f8ff; font-size: 11px; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }
+    #currentStepDesc { display: block; margin-top: 3px; overflow: hidden; color: #718ba0; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+    .id-chip, .state-chip { padding: 6px 8px; border: 1px solid rgba(38,214,238,.2); border-radius: 6px; background: rgba(5,14,23,.65); color: var(--cyan); font: 700 9px ui-monospace, monospace; white-space: nowrap; }
+    .state-chip { color: var(--orange); border-color: rgba(255,174,66,.22); }
+    .scenario { justify-content: flex-end; }
+    .scenario-label { margin-right: 3px; color: #607c92; font-size: 9px; }
+    .scenario-btn { height: 30px; padding: 0 9px; font-size: 9px; }
+    .scenario-btn.active[data-scenario="ok"] { border-color: var(--green); color: var(--green); background: rgba(51,223,144,.09); }
+    .scenario-btn.active[data-scenario="ng"] { border-color: var(--red); color: #ff8993; background: rgba(255,95,109,.09); }
+    .scenario-btn.active[data-scenario="invalid"] { border-color: var(--orange); color: var(--orange); background: rgba(255,174,66,.09); }
+
+    .result-card { position: absolute; z-index: 9; left: 50%; bottom: 17px; width: min(390px, calc(100% - 32px)); padding: 13px 15px; border: 1px solid rgba(255,95,109,.55); border-radius: 11px; background: rgba(10,17,25,.94); box-shadow: 0 16px 40px rgba(0,0,0,.46); opacity: 0; transform: translate(-50%, 18px); }
+    .result-card.ok { border-color: rgba(51,223,144,.58); }
+    .result-card.invalid { border-color: rgba(255,174,66,.58); }
+    .result-top { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+    .result-top span { color: #70899d; font-size: 9px; letter-spacing: .1em; }
+    #resultBadge { padding: 4px 8px; border-radius: 5px; background: rgba(255,95,109,.14); color: var(--red); font: 800 12px ui-monospace, monospace; }
+    .result-card.ok #resultBadge { color: var(--green); background: rgba(51,223,144,.12); }
+    .result-card.invalid #resultBadge { color: var(--orange); background: rgba(255,174,66,.12); }
+    #resultTitle { margin: 10px 0 4px; font-size: 14px; }
+    #resultSummary { margin: 0; color: #91aabe; font-size: 10px; line-height: 1.5; }
+
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+    @media (max-width: 1180px) {
+      .theatre { grid-template-columns: 1fr 1.45fr; }
+      .flow-panel { grid-column: 1 / -1; min-height: 720px; }
+      .flow-scroll { max-height: 480px; }
+      .controlbar { grid-template-columns: 1fr; }
+      .scenario { justify-content: flex-start; }
+    }
+    @media (max-width: 760px) {
+      .app { padding: 10px; }
+      .topbar { grid-template-columns: 1fr; }
+      .legend { flex-wrap: wrap; }
+      .theatre { grid-template-columns: 1fr; }
+      .flow-panel { grid-column: auto; }
+      .now { grid-template-columns: 1fr 1fr; }
+      .step-copy { grid-column: 1 / -1; order: -1; }
+      .metrics { grid-template-columns: repeat(2,1fr); }
+      .scene-wrap { height: 430px; }
+      .screen { height: 390px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <header class="topbar">
+      <div>
+        <div class="eyebrow">Industrial Vision / Interactive Explainer</div>
+        <h1>矩形金属连接板 · 机器视觉检测小剧场</h1>
+        <div class="subtitle">从光电触发到 PLC 放行 / 剔除：看懂同一 frameId 如何穿过图像算法与业务闭环</div>
+      </div>
+      <div class="legend" aria-label="状态图例">
+        <span class="processing"><i></i>PROCESSING</span>
+        <span class="ok"><i></i>OK / PASS</span>
+        <span class="ng"><i></i>NG / ALARM</span>
+      </div>
+    </header>
+
+    <section class="theatre">
+      <article class="panel scene-panel">
+        <div class="panel-head">
+          <div class="panel-title"><span class="panel-index">01</span><div><h2>业务现场</h2><p>设备、工件与信号同步</p></div></div>
+          <span class="eyebrow">STATION V-07</span>
+        </div>
+        <div class="scene-wrap">
+          <svg id="factoryScene" viewBox="0 0 400 500" role="img" aria-label="传送带金属连接板视觉检测工位示意图">
+            <defs>
+              <linearGradient id="beltGrad" x1="0" x2="0" y1="0" y2="1"><stop stop-color="#21384b"/><stop offset="1" stop-color="#0b1723"/></linearGradient>
+              <linearGradient id="metalGrad" x1="0" x2="1"><stop stop-color="#94a8b5"/><stop offset=".5" stop-color="#d4e2e8"/><stop offset="1" stop-color="#7d929f"/></linearGradient>
+              <filter id="cyanGlow"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+            </defs>
+            <g opacity=".24" stroke="#416078" stroke-width="1"><path d="M20 75H380M20 145H380M20 215H380M20 285H380M20 355H380M20 425H380"/><path d="M70 30V470M140 30V470M210 30V470M280 30V470M350 30V470"/></g>
+
+            <g id="device-camera" class="scene-device">
+              <path d="M103 55V155" stroke="#526b80" stroke-width="7"/><path d="M78 55H185" stroke="#526b80" stroke-width="7"/>
+              <rect class="device-shell" x="132" y="74" width="74" height="48" rx="8"/>
+              <circle cx="169" cy="123" r="16" fill="#07111a" stroke="#5f829b" stroke-width="4"/><circle cx="169" cy="123" r="7" fill="#1e87ac"/>
+              <path d="M139 138L108 245M199 138L230 245" stroke="#26d6ee" stroke-dasharray="5 7" opacity=".25"/>
+              <text x="169" y="91" class="device-label" text-anchor="middle">工业相机</text><text x="169" y="104" class="device-sub" text-anchor="middle">CAM-07 / 5MP</text>
+              <circle id="cameraFlash" cx="169" cy="123" r="25" fill="none" stroke="#e8fbff" stroke-width="5"/>
+            </g>
+
+            <g id="device-sensor" class="scene-device">
+              <rect class="device-shell" x="39" y="202" width="45" height="35" rx="6"/>
+              <circle cx="70" cy="219" r="5" fill="#ffae42"/>
+              <path id="sensorBeam" d="M84 219H127" stroke="#ffae42" stroke-width="3" stroke-dasharray="4 4" opacity=".35"/>
+              <text x="61" y="191" class="device-label" text-anchor="middle">光电传感器</text><text x="61" y="250" class="device-sub" text-anchor="middle">DI-103</text>
+            </g>
+
+            <g id="device-conveyor" class="scene-device">
+              <rect class="device-shell" x="23" y="260" width="354" height="95" rx="12" fill="url(#beltGrad)"/>
+              <path d="M35 278H365M35 337H365" stroke="#38536a" stroke-width="2"/>
+              <g id="beltTicks" stroke="#597287" opacity=".5"><path d="M52 278V337M83 278V337M114 278V337M145 278V337M176 278V337M207 278V337M238 278V337M269 278V337M300 278V337M331 278V337"/></g>
+              <circle cx="49" cy="365" r="12" fill="#13283a" stroke="#426078"/><circle cx="351" cy="365" r="12" fill="#13283a" stroke="#426078"/>
+              <text x="28" y="390" class="device-label">传送带 CV-02</text><text x="28" y="405" class="device-sub">LINE SPEED 320 mm/s</text>
+            </g>
+
+            <g id="sceneWorkpiece">
+              <rect x="113" y="286" width="126" height="48" rx="5" fill="url(#metalGrad)" stroke="#d9f0f5" stroke-width="2"/>
+              <circle cx="145" cy="310" r="9" fill="#0d1b27" stroke="#6f8592" stroke-width="2"/><circle cx="207" cy="310" r="9" fill="#0d1b27" stroke="#6f8592" stroke-width="2"/>
+              <path d="M113 300L120 294L113 289" fill="#0d1b27" opacity=".7"/><circle cx="184" cy="297" r="5" fill="#7e4e39" opacity=".75"/>
+              <text x="176" y="349" fill="#8aa4b6" font-size="9" text-anchor="middle">PLATE-08040</text>
+            </g>
+
+            <g id="sceneFrameCard" filter="url(#cyanGlow)">
+              <rect x="225" y="151" width="139" height="53" rx="7" fill="#0b2130" stroke="#26d6ee"/>
+              <text x="236" y="169" fill="#6f91a8" font-size="8">FRAME OBJECT</text><text id="sceneFrameId" x="236" y="184" fill="#dffaff" font-size="11" font-family="monospace">FRM-...</text>
+              <circle id="sceneSignalDot" cx="349" cy="178" r="5" fill="#26d6ee"/>
+            </g>
+
+            <g id="device-plc" class="scene-device">
+              <rect class="device-shell" x="22" y="430" width="116" height="52" rx="8"/>
+              <text x="35" y="450" class="device-label">PLC / I/O</text><text id="plcStateText" x="35" y="465" class="device-sub">WAITING</text>
+              <circle id="plcGreen" cx="111" cy="448" r="5" fill="#25443b"/><circle id="plcRed" cx="125" cy="448" r="5" fill="#4b2930"/>
+            </g>
+
+            <g id="device-hmi" class="scene-device">
+              <rect class="device-shell" x="157" y="422" width="112" height="65" rx="8"/>
+              <rect x="169" y="433" width="88" height="36" rx="3" fill="#06111b" stroke="#315269"/>
+              <path id="hmiTrend" d="M174 458L185 451L196 456L207 443L218 449L229 438L241 446L252 439" fill="none" stroke="#26d6ee" stroke-width="2"/>
+              <text x="213" y="481" class="device-sub" text-anchor="middle">HMI / TRACEABILITY</text>
+            </g>
+
+            <g id="device-reject" class="scene-device">
+              <rect class="device-shell" x="291" y="403" width="86" height="80" rx="8"/>
+              <path d="M308 432V457" stroke="#637f93" stroke-width="7"/><path id="rejectArm" d="M308 435L354 454" stroke="#ff5f6d" stroke-width="7" stroke-linecap="round"/>
+              <text x="334" y="420" class="device-label" text-anchor="middle">剔除机构</text><text x="334" y="474" class="device-sub" text-anchor="middle">DO-207</text>
+            </g>
+
+            <path id="dataPath" d="M169 130C184 166 218 173 260 176C316 181 316 324 331 401" fill="none" stroke="#26d6ee" stroke-width="2" stroke-dasharray="4 8" opacity=".22"/>
+            <circle id="sceneDataDot" cx="169" cy="130" r="5" fill="#26d6ee" opacity="0"/>
+          </svg>
+        </div>
+        <div class="mini-status-grid">
+          <div class="mini-card"><span class="k">Workpiece</span><span id="workpieceId" class="v">WP-08040-027</span></div>
+          <div class="mini-card"><span class="k">Trigger</span><span id="triggerValue" class="v accent">DI-103 = 0</span></div>
+          <div class="mini-card"><span class="k">PLC Command</span><span id="plcCommand" class="v">—</span></div>
+          <div class="mini-card"><span class="k">Trace Record</span><span id="traceValue" class="v">PENDING</span></div>
+        </div>
+      </article>
+
+      <article class="panel vision-panel">
+        <div class="panel-head">
+          <div class="panel-title"><span class="panel-index">02</span><div><h2>图像处理 / 调试视图</h2><p>输入 → 处理 → 可解释输出</p></div></div>
+          <span id="algorithmName" class="eyebrow">WAITING FOR TRIGGER</span>
+        </div>
+        <div class="vision-body">
+          <div id="visionScreen" class="screen">
+            <div class="screen-badge"><i></i><span id="screenFrameId">NO FRAME</span></div>
+            <div id="screenStage" class="screen-stage">STANDBY</div>
+            <svg id="visionSvg" viewBox="0 0 720 440" aria-label="图像处理阶段可视化">
+              <defs>
+                <linearGradient id="imageBg" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#1c2831"/><stop offset=".5" stop-color="#34434a"/><stop offset="1" stop-color="#131f28"/></linearGradient>
+                <linearGradient id="plateVisionGrad" x1="0" x2="1"><stop stop-color="#8b9ca4"/><stop offset=".45" stop-color="#cfdadd"/><stop offset=".7" stop-color="#9daeb5"/><stop offset="1" stop-color="#72858e"/></linearGradient>
+                <filter id="softBlur"><feGaussianBlur stdDeviation="1.5"/></filter>
+                <filter id="glow"><feGaussianBlur stdDeviation="2.4" result="g"/><feMerge><feMergeNode in="g"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+                <clipPath id="imageClip"><rect x="45" y="48" width="630" height="335" rx="10"/></clipPath>
+              </defs>
+              <rect x="44" y="47" width="632" height="337" rx="11" fill="#050b11" stroke="#436077"/>
+              <g clip-path="url(#imageClip)">
+                <rect id="imageField" x="45" y="48" width="630" height="335" fill="url(#imageBg)"/>
+                <g id="noiseLayer" opacity=".34" fill="#dce7e9">
+                  <circle cx="88" cy="86" r="1"/><circle cx="126" cy="170" r="1.4"/><circle cx="196" cy="102" r="1"/><circle cx="248" cy="314" r="1.2"/><circle cx="306" cy="78" r="1"/><circle cx="371" cy="346" r="1.5"/><circle cx="429" cy="112" r="1"/><circle cx="498" cy="304" r="1.3"/><circle cx="565" cy="92" r="1"/><circle cx="632" cy="210" r="1.4"/><circle cx="90" cy="280" r="1"/><circle cx="168" cy="344" r="1.2"/><circle cx="600" cy="350" r="1"/>
+                </g>
+                <g id="visionPlate" style="transform-box:fill-box;transform-origin:center">
+                  <path id="plateBody" d="M204 146 L507 146 L524 158 L524 288 L507 300 L204 300 L192 288 L192 158 Z" fill="url(#plateVisionGrad)" stroke="#d9e4e7" stroke-width="2"/>
+                  <circle id="plateHole1" cx="278" cy="223" r="25" fill="#16232b" stroke="#5e747d" stroke-width="3"/>
+                  <circle id="plateHole2" cx="438" cy="223" r="22" fill="#16232b" stroke="#5e747d" stroke-width="3"/>
+                  <path id="missingEdge" d="M192 187L208 197L192 211" fill="#16232b"/>
+                  <ellipse id="surfaceSpot" cx="373" cy="184" rx="17" ry="10" fill="#5e3e2f" opacity=".8"/>
+                  <path d="M228 168L491 168" stroke="#fff" stroke-width="3" opacity=".08"/>
+                </g>
+
+                <g id="qualityOverlay" class="vision-overlay">
+                  <rect x="66" y="72" width="166" height="93" rx="8" class="hud-card"/>
+                  <text x="82" y="94" class="hud-text">IMAGE QUALITY GATE</text>
+                  <text x="82" y="119" class="hud-text">Brightness</text><text id="qBrightness" x="206" y="119" text-anchor="end" class="hud-value">128 / OK</text>
+                  <text x="82" y="139" class="hud-text">Laplacian</text><text id="qSharpness" x="206" y="139" text-anchor="end" class="hud-value">186 / OK</text>
+                  <circle id="qualityLamp" cx="216" cy="90" r="6" fill="#33df90"/>
+                </g>
+
+                <g id="roiOverlay" class="vision-overlay">
+                  <rect x="169" y="126" width="380" height="196" rx="3" fill="none" stroke="#26d6ee" stroke-width="2" stroke-dasharray="8 6"/>
+                  <path d="M169 146V126H189M529 126H549V146M549 302V322H529M189 322H169V302" fill="none" stroke="#e9fcff" stroke-width="3"/>
+                  <text x="174" y="119" fill="#26d6ee" font-size="10" font-family="monospace">ROI #1 · UNDISTORTED</text>
+                  <path d="M359 106V342M145 223H573" class="crosshair"/>
+                </g>
+
+                <g id="grayOverlay" class="vision-overlay">
+                  <rect x="557" y="72" width="95" height="25" rx="5" fill="#07131d" stroke="#738795"/>
+                  <text x="604" y="88" text-anchor="middle" fill="#c8d5d9" font-size="9" font-family="monospace">GRAY + CLAHE</text>
+                </g>
+
+                <g id="segmentOverlay" class="vision-overlay">
+                  <path d="M204 146 L507 146 L524 158 L524 288 L507 300 L204 300 L192 288 L192 158 Z" fill="rgba(38,214,238,.10)" stroke="#26d6ee" stroke-width="4" filter="url(#glow)"/>
+                  <circle cx="278" cy="223" r="25" fill="none" stroke="#ffae42" stroke-width="3"/><circle cx="438" cy="223" r="22" fill="none" stroke="#ffae42" stroke-width="3"/>
+                  <text x="482" y="333" fill="#26d6ee" font-size="10" font-family="monospace">OTSU MASK / CANNY</text>
+                </g>
+
+                <g id="morphOverlay" class="vision-overlay">
+                  <rect x="69" y="287" width="151" height="52" rx="7" class="hud-card"/>
+                  <g transform="translate(83 299)" fill="#26d6ee"><rect x="0" y="0" width="6" height="6"/><rect x="8" y="0" width="6" height="6"/><rect x="16" y="0" width="6" height="6"/><rect x="0" y="8" width="6" height="6"/><rect x="8" y="8" width="6" height="6"/><rect x="16" y="8" width="6" height="6"/><rect x="0" y="16" width="6" height="6"/><rect x="8" y="16" width="6" height="6"/><rect x="16" y="16" width="6" height="6"/></g>
+                  <text x="122" y="309" class="hud-text">CLOSE 5×5</text><text x="122" y="326" class="hud-value">holes filled · noise removed</text>
+                </g>
+
+                <g id="featureOverlay" class="vision-overlay">
+                  <path d="M204 146 L507 146 L524 158 L524 288 L507 300 L204 300 L192 288 L192 158 Z" fill="none" stroke="#33df90" stroke-width="2" stroke-dasharray="6 4"/>
+                  <g stroke="#ffae42" stroke-width="2"><path d="M264 223H292M278 209V237"/><path d="M424 223H452M438 209V237"/></g>
+                  <circle cx="278" cy="223" r="25" fill="none" stroke="#ffae42" stroke-width="2" stroke-dasharray="4 3"/><circle cx="438" cy="223" r="22" fill="none" stroke="#ffae42" stroke-width="2" stroke-dasharray="4 3"/>
+                  <text x="272" y="257" fill="#ffca78" font-size="9" font-family="monospace">C1</text><text x="432" y="257" fill="#ffca78" font-size="9" font-family="monospace">C2</text>
+                </g>
+
+                <g id="measureOverlay" class="vision-overlay">
+                  <path d="M192 330V347M524 330V347M192 340H524" stroke="#26d6ee" stroke-width="2"/><path d="M192 340L202 335V345ZM524 340L514 335V345Z" fill="#26d6ee"/>
+                  <text x="358" y="365" text-anchor="middle" fill="#9df5ff" font-size="12" font-family="monospace">79.84 mm</text>
+                  <path d="M548 146H565M548 300H565M558 146V300" stroke="#26d6ee" stroke-width="2"/><path d="M558 146L553 156H563ZM558 300L553 290H563Z" fill="#26d6ee"/>
+                  <text x="582" y="228" fill="#9df5ff" font-size="12" font-family="monospace" transform="rotate(90 582 228)">40.12 mm</text>
+                  <path d="M278 223L278 187" stroke="#ffae42" stroke-width="2"/><text x="287" y="190" fill="#ffca78" font-size="10" font-family="monospace">Ø10.1</text>
+                  <path d="M438 223L438 187" stroke="#ff5f6d" stroke-width="2"/><text id="hole2Measure" x="447" y="190" fill="#ff8993" font-size="10" font-family="monospace">Ø8.8 NG</text>
+                </g>
+
+                <g id="defectOverlay" class="vision-overlay">
+                  <rect x="179" y="178" width="38" height="43" fill="none" stroke="#ff5f6d" stroke-width="2"/><path d="M216 178L251 150" stroke="#ff5f6d"/><text x="255" y="150" fill="#ff8993" font-size="10" font-family="monospace">EDGE_MISSING 2.4mm</text>
+                  <ellipse cx="373" cy="184" rx="23" ry="16" fill="none" stroke="#ffae42" stroke-width="2"/><path d="M392 173L435 127" stroke="#ffae42"/><text x="441" y="127" fill="#ffca78" font-size="10" font-family="monospace">STAIN 42px²</text>
+                </g>
+
+                <g id="resultOverlay" class="vision-overlay">
+                  <rect id="resultBox" x="184" y="138" width="348" height="170" rx="4" fill="none" stroke="#ff5f6d" stroke-width="4"/>
+                  <rect id="resultLabelBg" x="184" y="109" width="210" height="29" rx="4" fill="#ff5f6d"/>
+                  <text id="resultLabelText" x="195" y="129" fill="#07111b" font-size="12" font-weight="800" font-family="monospace">NG · DEFECTS 03 · 0.96</text>
+                </g>
+              </g>
+              <text x="52" y="407" fill="#557087" font-size="9" font-family="monospace">CALIBRATION: 0.241 mm/px  ·  EXPOSURE: 780 μs  ·  GAIN: 1.6 dB</text>
+              <text x="668" y="407" text-anchor="end" fill="#557087" font-size="9" font-family="monospace">VIEW 01 / LIVE DEBUG</text>
+            </svg>
+            <div id="resultCard" class="result-card">
+              <div class="result-top"><span>INSPECTION RESULT</span><b id="resultBadge">NG</b></div>
+              <h3 id="resultTitle">缺陷判定完成</h3>
+              <p id="resultSummary">孔 2 直径偏小，左侧轮廓缺料，并检测到明显污点。</p>
+            </div>
+          </div>
+          <div class="metrics">
+            <div class="metric"><span>BRIGHTNESS</span><strong id="metricBrightness">—</strong></div>
+            <div class="metric"><span>POSE</span><strong id="metricPose">—</strong></div>
+            <div class="metric"><span>HOLES</span><strong id="metricHoles">—</strong></div>
+            <div class="metric"><span>DECISION</span><strong id="metricDecision">PENDING</strong></div>
+          </div>
+          <div id="logStrip" class="log-strip" aria-live="polite"></div>
+        </div>
+      </article>
+
+      <article class="panel flow-panel">
+        <div class="panel-head">
+          <div class="panel-title"><span class="panel-index">03</span><div><h2>业务闭环</h2><p>点击任一节点查看技术细节</p></div></div>
+          <span class="eyebrow">FRAME LIFECYCLE</span>
+        </div>
+        <div id="flowScroll" class="flow-scroll">
+          <div id="flowStack" class="flow-stack"><div id="flowToken" class="flow-token" aria-hidden="true"></div></div>
+        </div>
+        <section class="detail" aria-live="polite">
+          <div class="detail-head">
+            <div><div class="detail-kicker">Technical Detail / Clickable Node</div><h3 id="detailTitle">—</h3></div>
+            <span id="detailStepNo">NODE 00</span>
+          </div>
+          <div class="detail-grid">
+            <div class="detail-item wide"><h4>业务作用</h4><p id="detailPurpose"></p></div>
+            <div class="detail-item"><h4>输入</h4><p id="detailInput"></p></div>
+            <div class="detail-item"><h4>输出</h4><p id="detailOutput"></p></div>
+            <div class="detail-item wide"><h4>关键技术</h4><div id="detailTech" class="tags"></div></div>
+            <div class="detail-item"><h4>异常 / 判断</h4><p id="detailAbnormal"></p></div>
+            <div class="detail-item"><h4>前后关系</h4><p id="detailRelation"></p></div>
+          </div>
+          <div id="detailEnglish" class="english"></div>
+        </section>
+      </article>
+    </section>
+
+    <footer class="controlbar">
+      <div class="controls" aria-label="动画控制">
+        <button id="playBtn" class="control-btn primary">▶ Play</button>
+        <button id="pauseBtn" class="control-btn">Ⅱ Pause</button>
+        <button id="restartBtn" class="control-btn">↻ Restart</button>
+        <button id="nextBtn" class="control-btn">Step Next →</button>
+      </div>
+      <div class="now">
+        <span id="stepCount" class="step-count">00 / 00</span>
+        <div class="step-copy"><strong id="currentStepTitle">等待开始</strong><span id="currentStepDesc">选择剧本或点击 Play，观察 frameId 穿过完整检测链路。</span></div>
+        <span id="currentId" class="id-chip">frameId: —</span>
+        <span id="currentState" class="state-chip">Standby</span>
+      </div>
+      <div class="scenario" aria-label="分支剧本">
+        <span class="scenario-label">本轮剧本</span>
+        <button class="scenario-btn" data-scenario="ok">OK 放行</button>
+        <button class="scenario-btn active" data-scenario="ng">NG 剔除</button>
+        <button class="scenario-btn" data-scenario="invalid">Invalid 重拍</button>
+      </div>
+    </footer>
+  </main>
+
+  <script>
+    // 业务节点数据：流程、点击详情与动画均从这里读取。
+    const flowNodes = [
+      {
+        id: "trigger", title: "光电触发 / 工件到位", shortLabel: "Photoelectric Trigger", kind: "normal",
+        businessPurpose: "光电传感器确认连接板进入拍照窗口，锁定一次检测节拍并避免无工件空拍。",
+        input: "DI-103 上升沿、workpieceId、产线节拍时间。", output: "TriggerEvent 与拍照请求，绑定 stationId=V-07。",
+        technologies: ["PLC 数字量输入", "上升沿检测", "去抖 20 ms", "工位互锁"],
+        abnormalCases: ["信号抖动", "工件间距过短", "传感器常亮", "触发超时"],
+        relation: "位于物理工件与视觉流程的边界；触发后相机才允许曝光。",
+        interviewEnglish: "The photoelectric sensor starts one inspection cycle when the plate reaches the camera position."
+      },
+      {
+        id: "capture", title: "相机曝光并产生 FrameInput", shortLabel: "Frame Capture", kind: "normal",
+        businessPurpose: "在冻结的工件位置完成曝光，把像素数据和采集元数据封装为同一帧对象。",
+        input: "TriggerEvent、曝光 780 μs、增益 1.6 dB、cameraId=CAM-07。", output: "FrameInput{frameId,timestamp,rawImage,cameraId,workpieceId}。",
+        technologies: ["硬触发采集", "曝光 / 增益", "Buffer 管理", "时间戳关联"],
+        abnormalCases: ["丢帧", "曝光超时", "Buffer 溢出", "相机离线"],
+        relation: "承接 PLC 触发，并把可追踪的 frameId 交给质量门禁。",
+        interviewEnglish: "The camera captures one traceable frame and binds it to the current workpiece."
+      },
+      {
+        id: "quality", title: "图像质量门禁", shortLabel: "Quality Gate", kind: "normal",
+        businessPurpose: "先判断图像是否值得继续计算，防止过暗、过曝、模糊或无工件图像制造假缺陷。",
+        input: "FrameInput 的原始图像与相机元数据。", output: "QualityResult{brightnessOk,blurOk,partVisibleOk,usable}。",
+        technologies: ["灰度直方图", "Laplacian 方差", "饱和像素比例", "前景占比"],
+        abnormalCases: ["平均灰度 < 55", "过曝比例 > 8%", "清晰度 < 70", "主体不可见"],
+        relation: "位于采集之后、昂贵算法之前；不可用时应重拍或报警，而不是继续判 NG。",
+        interviewEnglish: "This gate rejects unusable images before expensive vision algorithms run."
+      },
+      {
+        id: "invalid", title: "Invalid：重拍 / 停线 / 报警", shortLabel: "Retry & Alarm", kind: "error",
+        businessPurpose: "把成像问题与真实产品缺陷分开处理；先请求重拍，连续失败才升级为设备报警或停线。",
+        input: "usable=false、失败原因、retryCount。", output: "RetakeCommand；或 VisionDeviceAlarm 与 LineHold。",
+        technologies: ["有限重试", "故障分级", "PLC 握手", "Alarm Code"],
+        abnormalCases: ["重拍仍模糊", "照明故障", "相机断连", "连续 Invalid 超限"],
+        relation: "是质量门禁的异常分支，不进入尺寸和缺陷判断，避免把设备问题误归因于产品。",
+        interviewEnglish: "An invalid image triggers a retry first and an equipment alarm only after repeated failure."
+      },
+      {
+        id: "preprocess", title: "ROI、校正、预处理与分割", shortLabel: "ROI & Preprocess", kind: "normal",
+        businessPurpose: "只保留检测区域，消除镜头畸变与光照波动，并生成稳定的前景掩膜和边缘。",
+        input: "可用 FrameInput、标定参数、ROI 配方。", output: "CorrectedROI、GrayImage、EnhancedImage、BinaryMask、EdgeMap。",
+        technologies: ["ROI 裁剪", "畸变校正", "CLAHE", "中值滤波", "Otsu", "Canny", "形态学闭运算"],
+        abnormalCases: ["ROI 配方错误", "反光导致断边", "阈值漂移", "前景粘连"],
+        relation: "把原始图变为定位和测量可用的数据，后续算法共享同一预处理结果。",
+        interviewEnglish: "We crop, correct, enhance, and segment the image to obtain a stable plate mask."
+      },
+      {
+        id: "normalize", title: "定位主体并归一化姿态", shortLabel: "Pose Normalize", kind: "normal",
+        businessPurpose: "找到连接板中心和主方向，把倾斜工件旋正到统一坐标系，使尺寸与孔位可按图纸比较。",
+        input: "BinaryMask、外轮廓候选、标定比例 0.241 mm/px。", output: "Pose{x,y,angle}、NormalizedImage、partCoordinateSystem。",
+        technologies: ["最大轮廓", "minAreaRect", "仿射变换", "像素到毫米标定"],
+        abnormalCases: ["主体数量不唯一", "角度超 ±8°", "轮廓残缺", "工件越界"],
+        relation: "承接分割结果，并为尺寸、孔、缺陷三条并行检测建立共同坐标。",
+        interviewEnglish: "The plate is located and rotated into a normalized coordinate system for repeatable measurement."
+      },
+      {
+        id: "dimensions", title: "尺寸 / 位置 / 角度检测", shortLabel: "Geometry Check", kind: "normal",
+        businessPurpose: "测量 80×40 mm 外形、中心偏移和姿态角，确认工件到位且整体几何满足公差。",
+        input: "归一化外轮廓、标定比例、图纸公差。", output: "GeometryResult{length,width,offsetX,offsetY,angle,pass}。",
+        technologies: ["亚像素边缘", "直线拟合", "欧氏距离", "公差带判定"],
+        abnormalCases: ["长度超差", "宽度超差", "中心偏移", "角度超限"],
+        relation: "是归一化后的并行检测分支之一，结果按 frameId 送往聚合器。",
+        interviewEnglish: "This branch checks plate size, position, and angle against the drawing tolerances."
+      },
+      {
+        id: "holes", title: "孔数量 / 孔位 / 孔径检测", shortLabel: "Hole Inspection", kind: "normal",
+        businessPurpose: "验证两个安装孔是否齐全，并检查圆心位置和直径 10 mm 是否满足装配要求。",
+        input: "NormalizedImage、孔位搜索区、直径和位置公差。", output: "HoleResult{count,centers,diameters,confidence,pass}。",
+        technologies: ["轮廓层级", "圆拟合", "Hough Circle", "同心度 / 孔距"],
+        abnormalCases: ["少孔或多孔", "孔径偏小", "孔位偏移", "毛刺导致非圆"],
+        relation: "与几何、缺陷分支并行；本剧本中孔 2 的 Ø8.8 mm 将触发 NG。",
+        interviewEnglish: "We verify the hole count, centers, and diameters in the normalized plate coordinates."
+      },
+      {
+        id: "defects", title: "缺口与表面污点检测", shortLabel: "Defect Inspection", kind: "normal",
+        businessPurpose: "将实测轮廓与标准模板比对找缺料，并在板面有效区内检测明显暗斑或污渍。",
+        input: "归一化轮廓、参考模板、排除孔洞后的表面 ROI。", output: "DefectResult{type,bbox,area,severity,pass}。",
+        technologies: ["轮廓差分", "模板配准", "Blob 分析", "连通域", "面积阈值"],
+        abnormalCases: ["边缘缺口 > 1.0 mm", "污点 > 25 px²", "反光伪缺陷", "划痕漏检"],
+        relation: "与尺寸和孔检测并行，输出结构化缺陷位置，供 UI 标注与追溯。",
+        interviewEnglish: "This branch compares contours and analyzes surface blobs to locate visible defects."
+      },
+      {
+        id: "aggregate", title: "同一 frameId 的结果聚合", shortLabel: "Result Aggregation", kind: "normal",
+        businessPurpose: "等待三条检测分支回齐，用同一 frameId 合并测量值、缺陷列表与置信度，再执行总判定规则。",
+        input: "GeometryResult、HoleResult、DefectResult，键均为同一 frameId。", output: "InspectionResult{decision,reasons,measurements,confidence,debugRefs}。",
+        technologies: ["Correlation ID", "Barrier / Join", "规则引擎", "超时与缺失结果"],
+        abnormalCases: ["结果串帧", "分支超时", "字段缺失", "规则版本不一致"],
+        relation: "汇合算法并行分支，之后同时驱动 PLC 动作和 UI / 追溯记录。",
+        interviewEnglish: "All branch results are joined by frameId before one final inspection decision is made."
+      },
+      {
+        id: "plc-ok", title: "PLC 放行", shortLabel: "PLC Pass", kind: "ok",
+        businessPurpose: "把 OK 判定转换为确定性的 PLC 握手信号，让合格连接板继续流向下工位。",
+        input: "InspectionResult.decision=OK 与当前节拍许可。", output: "DO_PASS=1、ack 状态、放行时间戳。",
+        technologies: ["PLC 握手", "输出脉冲", "节拍互锁", "超时确认"],
+        abnormalCases: ["PLC 未应答", "信号保持过久", "工件 ID 不一致", "下游阻塞"],
+        relation: "是聚合后的合格分支，同时把结果交给 UI 留档。",
+        interviewEnglish: "An OK result is handshaked to the PLC so the plate can continue downstream."
+      },
+      {
+        id: "plc-ng", title: "PLC 剔除 + 缺陷追溯", shortLabel: "Reject & Trace", kind: "ng",
+        businessPurpose: "在正确节拍驱动剔除机构，并把缺陷类型、位置、测量值和调试图绑定到工件记录。",
+        input: "InspectionResult.decision=NG、reasonCodes、workpieceId。", output: "DO_REJECT=1、RejectAck、TraceRecord 与调试图索引。",
+        technologies: ["剔除延时队列", "Encoder 跟踪", "MES / 数据库追溯", "图像归档"],
+        abnormalCases: ["错剔工件", "剔除确认失败", "追溯写入失败", "磁盘空间不足"],
+        relation: "是聚合后的不合格分支；物理剔除与数据追溯必须使用同一工件关联键。",
+        interviewEnglish: "An NG result rejects the correct plate and stores its defects for traceability."
+      },
+      {
+        id: "ui", title: "UI 标注、指标与调试图", shortLabel: "HMI & Debug View", kind: "normal",
+        businessPurpose: "将判定、测量线、缺陷框、耗时和原始 / 中间图展示给调试人员，并形成可审计记录。",
+        input: "InspectionResult、overlay primitives、debug images、算法版本。", output: "HMI 更新、统计指标、日志与可检索的检测记录。",
+        technologies: ["SVG / Canvas 叠加", "WebSocket", "SPC 指标", "结构化日志", "图像索引"],
+        abnormalCases: ["UI 与 PLC 状态不同步", "调试图过大", "日志丢失", "显示延迟"],
+        relation: "旁路订阅最终结果，不阻塞 PLC 实时控制，但必须保持 frameId 与版本可追踪。",
+        interviewEnglish: "The HMI visualizes measurements and defects without blocking the real-time PLC decision."
+      }
+    ];
+
+    const baseSteps = {
+      trigger: { nodeId: "trigger", state: "Triggered", title: "工件进入检测窗口", desc: "DI-103 上升沿锁定 WP-08040-027，并申请一次硬触发曝光。", algo: "PLC EDGE / DEBOUNCE", scene: ["sensor", "conveyor"], view: "trigger" },
+      capture: { nodeId: "capture", state: "Capturing", title: "相机曝光，创建 FrameInput", desc: "像素、时间戳和工件 ID 被封装到同一个 frameId。", algo: "HARDWARE TRIGGER CAPTURE", scene: ["camera"], view: "capture" },
+      quality: { nodeId: "quality", state: "Quality Check", title: "图像质量门禁", desc: "在运行昂贵算法前检查亮度、清晰度和主体可见性。", algo: "HISTOGRAM / LAPLACIAN", scene: ["camera", "hmi"], view: "quality" },
+      invalid: { nodeId: "invalid", state: "Alarm / Retry", title: "图像不可用，触发重拍", desc: "清晰度 42 < 70；本次不判产品 NG，先重拍，超限再停线报警。", algo: "INVALID IMAGE HANDLER", scene: ["camera", "plc"], view: "invalid" },
+      preprocess: { nodeId: "preprocess", state: "Processing", title: "ROI、校正、增强、分割", desc: "裁剪检测区域并逐步得到稳定的二值前景和干净轮廓。", algo: "ROI → CLAHE → OTSU → MORPH", scene: ["hmi"], view: "preprocess" },
+      grayscale: { nodeId: "preprocess", state: "Processing", title: "灰度化与颜色空间转换", desc: "把 BGR 像素转换为单通道灰度，降低后续阈值与边缘计算复杂度。", algo: "BGR → GRAY", scene: ["hmi"], view: "grayscale" },
+      enhance: { nodeId: "preprocess", state: "Processing", title: "去噪与局部对比度增强", desc: "中值滤波抑制散点噪声，CLAHE 拉开金属板与背景的灰度差。", algo: "MEDIAN 3×3 / CLAHE", scene: ["hmi"], view: "enhance" },
+      segment: { nodeId: "preprocess", state: "Processing", title: "阈值分割与边缘提取", desc: "Otsu 生成前景掩膜，Canny 提取板边与孔边，供轮廓分析使用。", algo: "OTSU MASK / CANNY", scene: ["hmi"], view: "segment" },
+      morphology: { nodeId: "preprocess", state: "Processing", title: "形态学清理二值掩膜", desc: "5×5 闭运算连接断边并填补小孔洞，清除孤立噪点后输出稳定 Mask。", algo: "MORPH CLOSE 5×5", scene: ["hmi"], view: "morphology" },
+      normalize: { nodeId: "normalize", state: "Normalizing", title: "定位主体并旋正姿态", desc: "由最大外轮廓估计中心与 -6.2° 姿态，仿射变换到零度坐标。", algo: "MIN AREA RECT / WARP", scene: ["hmi"], view: "normalize" },
+      dimensions: { nodeId: "dimensions", state: "Measuring", title: "检测外形尺寸、位置和角度", desc: "长度 79.84 mm、宽度 40.12 mm、角度 0.08°，均进入公差带判断。", algo: "SUBPIXEL GEOMETRY", scene: ["hmi"], view: "dimensions" },
+      holes: { nodeId: "holes", state: "Measuring", title: "检测孔数量、孔位和孔径", desc: "找到 2 个孔；NG 剧本中孔 2 为 Ø8.8 mm，低于 Ø9.7 mm 下限。", algo: "CONTOUR / CIRCLE FIT", scene: ["hmi"], view: "holes" },
+      defects: { nodeId: "defects", state: "Inspecting", title: "比对外轮廓并扫描表面", desc: "标出左侧 2.4 mm 缺口与 42 px² 暗斑，并输出缺陷坐标。", algo: "CONTOUR DIFF / BLOB", scene: ["hmi"], view: "defects" },
+      aggregate: { nodeId: "aggregate", state: "Aggregating", title: "按 frameId 聚合三路结果", desc: "Geometry、Hole、Defect 三个结果回齐，规则引擎给出最终判定。", algo: "FRAME JOIN / RULE ENGINE", scene: ["plc", "hmi"], view: "aggregate" },
+      ok: { nodeId: "plc-ok", state: "OK", title: "检测 OK，PLC 放行", desc: "DO_PASS 输出脉冲，下游接收合格连接板，同时写入 OK 追溯记录。", algo: "PLC PASS HANDSHAKE", scene: ["plc", "conveyor", "hmi"], view: "ok" },
+      ng: { nodeId: "plc-ng", state: "NG / Reject", title: "检测 NG，PLC 剔除并追溯", desc: "DO_REJECT 驱动剔除机构；缺陷位置、测量值与调试图写入追溯记录。", algo: "REJECT QUEUE / TRACE", scene: ["plc", "reject", "hmi"], view: "ng" },
+      ui: { nodeId: "ui", state: "Recorded", title: "UI 标注与检测记录完成", desc: "HMI 显示可解释叠加图、耗时与结果，记录可按 frameId 检索。", algo: "HMI OVERLAY / LOGGING", scene: ["hmi"], view: "ui" }
+    };
+
+    const scenarioPaths = {
+      ok: ["trigger", "capture", "quality", "preprocess", "grayscale", "enhance", "segment", "morphology", "normalize", "dimensions", "holes", "defects", "aggregate", "ok", "ui"],
+      ng: ["trigger", "capture", "quality", "preprocess", "grayscale", "enhance", "segment", "morphology", "normalize", "dimensions", "holes", "defects", "aggregate", "ng", "ui"],
+      invalid: ["trigger", "capture", "quality", "invalid"]
+    };
+
+    const $ = (selector) => document.querySelector(selector);
+    const $$ = (selector) => [...document.querySelectorAll(selector)];
+    const nodeById = Object.fromEntries(flowNodes.map(n => [n.id, n]));
+    let scenario = "ng";
+    let steps = [];
+    let currentStepIndex = -1;
+    let master;
+    let frameId = "—";
+    let logs = [];
+
+    function makeFrameId() {
+      const d = new Date();
+      const pad = n => String(n).padStart(2, "0");
+      return `FRM-${String(d.getFullYear()).slice(-2)}${pad(d.getMonth()+1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+    }
+
+    function renderFlow() {
+      const stack = $("#flowStack");
+      const token = $("#flowToken");
+      stack.innerHTML = "";
+      stack.appendChild(token);
+      const rows = [
+        ["trigger"], ["capture"], ["quality"], ["invalid", "preprocess"], ["normalize"],
+        ["dimensions", "holes", "defects"], ["aggregate"], ["plc-ok", "plc-ng"], ["ui"]
+      ];
+      rows.forEach(ids => {
+        const row = document.createElement("div");
+        row.className = `flow-row${ids.length > 1 ? " branch" : ""}${ids.length === 3 ? " three" : ""}`;
+        ids.forEach(id => {
+          const data = nodeById[id];
+          const button = document.createElement("button");
+          button.className = `flow-node kind-${data.kind}`;
+          button.dataset.node = id;
+          button.innerHTML = `<span class="n">${data.title}</span><span class="e">${data.shortLabel}</span>`;
+          button.addEventListener("click", () => selectNode(id, true));
+          row.appendChild(button);
+        });
+        stack.appendChild(row);
+      });
+    }
+
+    function selectNode(id, userSelected = false) {
+      const data = nodeById[id];
+      if (!data) return;
+      $$(".flow-node").forEach(el => el.classList.toggle("is-selected", el.dataset.node === id));
+      $("#detailTitle").textContent = data.title;
+      $("#detailStepNo").textContent = `NODE ${String(flowNodes.indexOf(data) + 1).padStart(2, "0")}`;
+      $("#detailPurpose").textContent = data.businessPurpose;
+      $("#detailInput").textContent = data.input;
+      $("#detailOutput").textContent = data.output;
+      $("#detailTech").innerHTML = data.technologies.map(t => `<span class="tag">${t}</span>`).join("");
+      $("#detailAbnormal").textContent = data.abnormalCases.join("；") + "。";
+      $("#detailRelation").textContent = data.relation;
+      $("#detailEnglish").textContent = `“${data.interviewEnglish}”`;
+      if (userSelected) {
+        const el = $(`.flow-node[data-node="${id}"]`);
+        const scroller = $("#flowScroll");
+        if (el && scroller) scroller.scrollTo({ top: Math.max(0, el.offsetTop - scroller.clientHeight / 2), behavior: "smooth" });
+      }
+    }
+
+    function addLog(message, level = "info") {
+      const now = new Date();
+      const stamp = now.toLocaleTimeString("zh-CN", { hour12: false });
+      logs.unshift(`<div class="log-line"><span class="time">${stamp}.${String(now.getMilliseconds()).padStart(3,"0")}</span> <span class="${level}">[${level.toUpperCase()}]</span> ${message}</div>`);
+      logs = logs.slice(0, 3);
+      $("#logStrip").innerHTML = logs.join("");
+    }
+
+    function setMetric(id, value, tone = "") {
+      const el = $(id); el.textContent = value; el.className = tone;
+    }
+
+    function resetVisuals() {
+      gsap.killTweensOf("*");
+      $$(".vision-overlay").forEach(el => { el.style.opacity = 0; });
+      gsap.set("#visionPlate", { rotation: -6.2, transformOrigin: "50% 50%" });
+      gsap.set("#sceneWorkpiece", { x: -150, y: 0, rotation: -5, opacity: 1 });
+      gsap.set("#sceneFrameCard, #sceneDataDot, #resultCard", { opacity: 0 });
+      gsap.set("#resultCard", { y: 18, xPercent: -50 });
+      gsap.set("#cameraFlash", { opacity: 0, scale: .7, transformOrigin: "50% 50%" });
+      gsap.set("#rejectArm", { rotation: 0, transformOrigin: "100% 0%" });
+      $("#imageField").setAttribute("fill", "url(#imageBg)");
+      $("#visionPlate").style.filter = "none";
+      $("#noiseLayer").style.opacity = ".34";
+      $("#qualityLamp").setAttribute("fill", "#33df90");
+      $("#qBrightness").textContent = "128 / OK";
+      $("#qSharpness").textContent = "186 / OK";
+      $("#qBrightness").setAttribute("fill", "#eaf8ff");
+      $("#qSharpness").setAttribute("fill", "#eaf8ff");
+      $("#resultCard").className = "result-card";
+      $$(".scene-device").forEach(el => el.classList.remove("is-active", "is-ok", "is-ng"));
+      $$(".flow-node").forEach(el => el.classList.remove("is-active"));
+      $("#triggerValue").textContent = "DI-103 = 0";
+      $("#plcCommand").textContent = "—";
+      $("#traceValue").textContent = "PENDING";
+      $("#plcStateText").textContent = "WAITING";
+      $("#plcGreen").setAttribute("fill", "#25443b");
+      $("#plcRed").setAttribute("fill", "#4b2930");
+      $("#algorithmName").textContent = "WAITING FOR TRIGGER";
+      $("#screenStage").textContent = "STANDBY";
+      $("#screenFrameId").textContent = "NO FRAME";
+      setMetric("#metricBrightness", "—"); setMetric("#metricPose", "—"); setMetric("#metricHoles", "—"); setMetric("#metricDecision", "PENDING");
+      logs = []; $("#logStrip").innerHTML = '<div class="log-line"><span class="time">SYSTEM</span> inspection runtime ready · recipe PLATE_80X40_R12</div>';
+      updateToken("trigger", true);
+    }
+
+    function updateToken(nodeId, instant = false) {
+      const target = $(`.flow-node[data-node="${nodeId}"]`);
+      const stack = $("#flowStack");
+      const token = $("#flowToken");
+      if (!target || !stack) return;
+      const sr = stack.getBoundingClientRect();
+      const tr = target.getBoundingClientRect();
+      const y = tr.top - sr.top + tr.height / 2 - 6;
+      gsap.to(token, { y, duration: instant ? 0 : .46, ease: "power2.inOut" });
+    }
+
+    function setActiveNode(nodeId) {
+      $$(".flow-node").forEach(el => el.classList.toggle("is-active", el.dataset.node === nodeId));
+      selectNode(nodeId);
+      updateToken(nodeId);
+      const active = $(`.flow-node[data-node="${nodeId}"]`);
+      const scroller = $("#flowScroll");
+      if (active && scroller) scroller.scrollTo({ top: Math.max(0, active.offsetTop - scroller.clientHeight / 2), behavior: "smooth" });
+    }
+
+    function activateScene(ids, tone = "active") {
+      $$(".scene-device").forEach(el => el.classList.remove("is-active", "is-ok", "is-ng"));
+      ids.forEach(id => $(`#device-${id}`)?.classList.add(`is-${tone}`));
+    }
+
+    function showOverlays(ids) {
+      $$(".vision-overlay").forEach(el => gsap.to(el, { opacity: ids.includes(el.id) ? 1 : 0, duration: .28, overwrite: true }));
+    }
+
+    function updateResultVisual(kind) {
+      const isOk = kind === "ok";
+      const isInvalid = kind === "invalid";
+      const card = $("#resultCard");
+      card.className = `result-card ${isOk ? "ok" : isInvalid ? "invalid" : ""}`;
+      $("#resultBadge").textContent = isOk ? "OK" : isInvalid ? "INVALID" : "NG";
+      $("#resultTitle").textContent = isOk ? "所有检测项通过" : isInvalid ? "图像质量不足" : "三项缺陷触发剔除";
+      $("#resultSummary").textContent = isOk ? "80×40 mm 外形、2 个 Ø10 mm 安装孔与表面质量均满足配方公差。" : isInvalid ? "清晰度低于门限，本帧不会进入产品判定；系统请求重拍并监控连续失败次数。" : "孔 2 直径偏小、左侧轮廓缺料，并检测到明显污点；结果已绑定缺陷坐标。";
+      $("#resultBox").setAttribute("stroke", isOk ? "#33df90" : isInvalid ? "#ffae42" : "#ff5f6d");
+      $("#resultLabelBg").setAttribute("fill", isOk ? "#33df90" : isInvalid ? "#ffae42" : "#ff5f6d");
+      $("#resultLabelText").textContent = isOk ? "OK · ALL CHECKS PASS · 0.98" : isInvalid ? "INVALID · RETRY REQUESTED" : "NG · DEFECTS 03 · 0.96";
+      gsap.to(card, { opacity: 1, y: 0, duration: .45, ease: "back.out(1.4)" });
+    }
+
+    function renderView(view) {
+      const normalOverlays = {
+        trigger: [], capture: [], quality: ["qualityOverlay"],
+        preprocess: ["roiOverlay"],
+        grayscale: ["roiOverlay", "grayOverlay"],
+        enhance: ["roiOverlay", "grayOverlay"],
+        segment: ["segmentOverlay"],
+        morphology: ["segmentOverlay", "morphOverlay"],
+        normalize: ["roiOverlay", "featureOverlay"],
+        dimensions: ["featureOverlay", "measureOverlay"],
+        holes: ["featureOverlay", "measureOverlay"],
+        defects: ["featureOverlay", "defectOverlay"],
+        aggregate: scenario === "ng" ? ["featureOverlay", "measureOverlay", "defectOverlay"] : ["featureOverlay", "measureOverlay"],
+        ok: ["featureOverlay", "measureOverlay", "resultOverlay"],
+        ng: ["featureOverlay", "measureOverlay", "defectOverlay", "resultOverlay"],
+        ui: scenario === "ng" ? ["featureOverlay", "measureOverlay", "defectOverlay", "resultOverlay"] : ["featureOverlay", "measureOverlay", "resultOverlay"],
+        invalid: ["qualityOverlay"]
+      };
+      showOverlays(normalOverlays[view] || []);
+
+      if (view === "trigger") {
+        gsap.to("#sceneWorkpiece", { x: 0, duration: .75, ease: "power2.out" });
+        $("#triggerValue").textContent = "DI-103 = 1 ↑";
+        addLog("DI-103 rising edge · workpiece WP-08040-027 locked", "info");
+      }
+      if (view === "capture") {
+        $("#screenFrameId").textContent = frameId;
+        $("#sceneFrameId").textContent = frameId;
+        gsap.to("#sceneFrameCard", { opacity: 1, duration: .25 });
+        gsap.fromTo("#cameraFlash", { opacity: .95, scale: .45 }, { opacity: 0, scale: 1.35, duration: .48 });
+        gsap.to("#sceneDataDot", { opacity: 1, duration: .15 });
+        gsap.to("#sceneDataDot", { attr: { cx: 260, cy: 176 }, duration: .7, ease: "power1.inOut" });
+        addLog(`${frameId} captured · 2448×2048 · 780μs`, "info");
+      }
+      if (view === "quality") {
+        if (scenario === "invalid") {
+          $("#qBrightness").textContent = "64 / LOW"; $("#qBrightness").setAttribute("fill", "#ffae42");
+          $("#qSharpness").textContent = "42 / FAIL"; $("#qSharpness").setAttribute("fill", "#ff5f6d");
+          $("#qualityLamp").setAttribute("fill", "#ff5f6d");
+          setMetric("#metricBrightness", "64 / LOW", "ng");
+          addLog("quality gate fail · brightness=64 · lapVar=42", "warn");
+        } else {
+          setMetric("#metricBrightness", "128 / OK", "ok");
+          addLog("quality gate pass · brightness=128 · lapVar=186", "pass");
+        }
+      }
+      if (view === "invalid") {
+        $("#qSharpness").textContent = "42 / FAIL"; $("#qSharpness").setAttribute("fill", "#ff5f6d");
+        $("#qualityLamp").setAttribute("fill", "#ff5f6d");
+        setMetric("#metricBrightness", "64 / LOW", "ng"); setMetric("#metricDecision", "INVALID", "ng");
+        $("#plcCommand").textContent = "RETAKE_REQ"; $("#traceValue").textContent = "IMG_QUALITY_FAIL"; $("#plcStateText").textContent = "RETRY / ALARM";
+        $("#plcRed").setAttribute("fill", "#ff5f6d");
+        addLog("image invalid · lapVar=42 < 70 · retry 1/2", "fail"); updateResultVisual("invalid");
+      }
+      if (view === "preprocess") {
+        addLog("ROI crop · x=169 y=126 w=380 h=196 · lens map applied", "info");
+      }
+      if (view === "grayscale") {
+        $("#visionPlate").style.filter = "grayscale(1)";
+        addLog("cvtColor(BGR2GRAY) · channels 3 → 1", "info");
+      }
+      if (view === "enhance") {
+        $("#visionPlate").style.filter = "grayscale(1) contrast(1.22)";
+        $("#noiseLayer").style.opacity = ".08";
+        addLog("median(3×3) · CLAHE clip=2.0 tile=8×8", "info");
+      }
+      if (view === "segment") {
+        $("#visionPlate").style.filter = "grayscale(1) contrast(1.45)";
+        addLog("Otsu threshold=117 · Canny low=60 high=140", "info");
+      }
+      if (view === "morphology") {
+        addLog("morph close · kernel=5×5 · components 19 → 3", "pass");
+      }
+      if (view === "normalize") {
+        gsap.to("#visionPlate", { rotation: 0, duration: .7, ease: "power2.inOut" });
+        setMetric("#metricPose", "-6.2° → 0.0°", "active");
+        addLog("pose normalized · center=(358.2,223.4) · angle=-6.2°", "pass");
+      }
+      if (view === "dimensions") {
+        setMetric("#metricPose", "0.08° / OK", "ok");
+        addLog("geometry · L=79.84mm · W=40.12mm · angle=0.08°", "pass");
+      }
+      if (view === "holes") {
+        const ng = scenario === "ng";
+        $("#plateHole2").setAttribute("r", ng ? "22" : "25");
+        $("#hole2Measure").textContent = ng ? "Ø8.8 NG" : "Ø10.0 OK";
+        $("#hole2Measure").setAttribute("fill", ng ? "#ff8993" : "#80efb5");
+        setMetric("#metricHoles", ng ? "2 / Ø8.8 NG" : "2 / Ø10.0 OK", ng ? "ng" : "ok");
+        addLog(ng ? "hole check · count=2 · D2=8.8mm < 9.7mm" : "hole check · count=2 · D1=10.1 · D2=10.0", ng ? "warn" : "pass");
+      }
+      if (view === "defects") {
+        const ng = scenario === "ng";
+        gsap.to("#defectOverlay", { opacity: ng ? 1 : 0, duration: .25 });
+        if (!ng) { $("#missingEdge").style.opacity = 0; $("#surfaceSpot").style.opacity = 0; }
+        addLog(ng ? "defects · EDGE_MISSING=2.4mm · STAIN=42px²" : "defect scan · contour delta=0.18mm · blobs=0", ng ? "warn" : "pass");
+      }
+      if (view === "aggregate") {
+        setMetric("#metricDecision", scenario === "ng" ? "NG / 0.96" : "OK / 0.98", scenario === "ng" ? "ng" : "ok");
+        addLog(`join complete · geometry ✓ · holes ${scenario === "ng" ? "✕" : "✓"} · defects ${scenario === "ng" ? "✕" : "✓"}`, scenario === "ng" ? "warn" : "pass");
+      }
+      if (view === "ok") {
+        activateScene(["plc", "conveyor", "hmi"], "ok");
+        $("#plcCommand").textContent = "DO_PASS = 1"; $("#traceValue").textContent = "OK / COMMITTED"; $("#plcStateText").textContent = "PASS ACK";
+        $("#plcGreen").setAttribute("fill", "#33df90");
+        setMetric("#metricDecision", "OK / PASS", "ok"); updateResultVisual("ok");
+        gsap.to("#sceneWorkpiece", { x: 180, duration: 1.0, ease: "power1.in" });
+        addLog("PLC handshake · DO_PASS=1 · PASS_ACK received", "pass");
+      }
+      if (view === "ng") {
+        activateScene(["plc", "reject", "hmi"], "ng");
+        $("#plcCommand").textContent = "DO_REJECT = 1"; $("#traceValue").textContent = "NG / SAVED"; $("#plcStateText").textContent = "REJECT ACK";
+        $("#plcRed").setAttribute("fill", "#ff5f6d");
+        setMetric("#metricDecision", "NG / REJECT", "ng"); updateResultVisual("ng");
+        gsap.to("#rejectArm", { rotation: -42, duration: .32, yoyo: true, repeat: 1, repeatDelay: .26 });
+        gsap.to("#sceneWorkpiece", { x: 120, y: 80, rotation: 18, opacity: .25, duration: 1.0, ease: "power2.in" });
+        addLog("PLC reject · encoder queue slot=027 · trace committed", "fail");
+      }
+      if (view === "ui") {
+        $("#traceValue").textContent = scenario === "ok" ? "OK / COMMITTED" : "NG / COMMITTED";
+        addLog(`HMI overlay published · ${frameId} · debug bundle saved`, "info");
+      }
+    }
+
+    function applyStep(index) {
+      if (index < 0 || index >= steps.length) return;
+      currentStepIndex = index;
+      const step = steps[index];
+      setActiveNode(step.nodeId);
+      activateScene(step.scene);
+      $("#stepCount").textContent = `${String(index + 1).padStart(2,"0")} / ${String(steps.length).padStart(2,"0")}`;
+      $("#currentStepTitle").textContent = step.title;
+      $("#currentStepDesc").textContent = step.desc;
+      $("#currentId").textContent = `frameId: ${index === 0 ? "allocating…" : frameId}`;
+      $("#currentState").textContent = step.state;
+      $("#algorithmName").textContent = step.algo;
+      $("#screenStage").textContent = step.state.toUpperCase();
+      renderView(step.view);
+    }
+
+    function buildTimeline(autoplay = false) {
+      if (master) master.kill();
+      scenario = $(".scenario-btn.active").dataset.scenario;
+      steps = scenarioPaths[scenario].map(key => ({ ...baseSteps[key] }));
+      frameId = makeFrameId();
+      currentStepIndex = -1;
+      resetVisuals();
+      $("#sceneFrameId").textContent = frameId;
+      $("#currentId").textContent = "frameId: —";
+      $("#currentState").textContent = "Standby";
+      $("#stepCount").textContent = `00 / ${String(steps.length).padStart(2,"0")}`;
+      $("#currentStepTitle").textContent = "等待开始";
+      $("#currentStepDesc").textContent = `已加载${scenario === "ok" ? " OK 放行" : scenario === "ng" ? " NG 剔除" : " Invalid 重拍"}剧本。`;
+      const isNgRecipe = scenario === "ng";
+      $("#plateHole2").setAttribute("r", isNgRecipe ? "22" : "25");
+      $("#hole2Measure").textContent = isNgRecipe ? "Ø8.8 NG" : "Ø10.0 OK";
+      $("#hole2Measure").setAttribute("fill", isNgRecipe ? "#ff8993" : "#80efb5");
+      $("#missingEdge").style.opacity = isNgRecipe ? 1 : 0;
+      $("#surfaceSpot").style.opacity = isNgRecipe ? .8 : 0;
+      master = gsap.timeline({ paused: true, defaults: { ease: "none" }, onComplete: () => { $("#playBtn").textContent = "▶ Replay"; } });
+      steps.forEach((step, i) => {
+        master.addLabel(`step-${i}`);
+        master.call(() => applyStep(i));
+        master.to({ hold: 0 }, { hold: 1, duration: i === steps.length - 1 ? 2.4 : 1.55 });
+      });
+      $("#playBtn").textContent = "▶ Play";
+      if (autoplay) master.play(0);
+    }
+
+    function stepNext() {
+      master.pause();
+      const next = Math.min(currentStepIndex + 1, steps.length - 1);
+      if (next === currentStepIndex && next === steps.length - 1) return;
+      // seek 时抑制 timeline 回调，再显式渲染一次，避免 Step Next 重复写日志。
+      master.seek(`step-${next}`, true);
+      applyStep(next);
+    }
+
+    $("#playBtn").addEventListener("click", () => {
+      if (master.progress() >= .999) buildTimeline(false);
+      master.play();
+      $("#playBtn").textContent = "▶ Playing";
+    });
+    $("#pauseBtn").addEventListener("click", () => { master.pause(); $("#playBtn").textContent = "▶ Resume"; });
+    $("#restartBtn").addEventListener("click", () => buildTimeline(true));
+    $("#nextBtn").addEventListener("click", stepNext);
+    $$(".scenario-btn").forEach(btn => btn.addEventListener("click", () => {
+      $$(".scenario-btn").forEach(b => b.classList.toggle("active", b === btn));
+      buildTimeline(true);
+    }));
+
+    renderFlow();
+    selectNode("trigger");
+    buildTimeline(false);
+    // 页面打开后短暂停留，再自动进入默认 NG 剧本，便于直接观看。
+    window.addEventListener("load", () => setTimeout(() => master.play(), 700));
+  </script>
+</body>
+</html>
